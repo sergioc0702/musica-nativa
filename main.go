@@ -41,6 +41,7 @@ func main() {
 		log.Fatal(err)
 	}
 	service.app = app
+	service.updates = app.Updater
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "Música Nativa",

@@ -70,6 +70,7 @@ type LibraryService struct {
 	queue     []string
 	queueAt   int
 	updateMu  sync.Mutex
+	updates   updateSource
 }
 
 func NewLibraryService(store *Store, player *AudioPlayer) *LibraryService {

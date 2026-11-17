@@ -14,7 +14,7 @@ import '../bindings/events'
 import { getPlayback, setPlayback, usePlayback } from './playback'
 
 type View = 'home' | 'tracks' | 'albums' | 'artists' | 'favorites' | 'playlists' | 'queue' | 'settings' | 'playlist'
-type UpdatePhase = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'installing' | 'ready' | 'error'
+type UpdatePhase = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'installing' | 'ready' | 'restarting' | 'error'
 type UpdateInfo = { phase: UpdatePhase; currentVersion: string; version?: string; name?: string; notes?: string; written: number; total: number; message?: string }
 
 const defaultUpdate: UpdateInfo = { phase: 'idle', currentVersion: '', written: 0, total: 0 }
@@ -75,6 +75,11 @@ function App() {
   const [toast, setToast] = useState('')
   const [busy, setBusy] = useState(false)
   const [update, setUpdate] = useState<UpdateInfo>(defaultUpdate)
+  const [updateRunning, setUpdateRunning] = useState(false)
+  // Updater errors are shown only once the listener starts an update, not for
+  // the quiet check when the app opens.
+  const updateRequested = useRef(false)
+  const launchCheckDone = useRef(false)
   const [showQueue, setShowQueue] = useState(false)
   const [showPlaylistForm, setShowPlaylistForm] = useState(false)
   const [playlistTarget, setPlaylistTarget] = useState<Track | null>(null)
@@ -150,6 +155,7 @@ function App() {
       setUpdate((current) => ({ ...current, phase: 'ready', version: release.version, name: release.name || current.name, notes: release.notes || current.notes }))
     })
     const stopError = Events.On('wails:updater:error', (event) => {
+      if (!updateRequested.current) return
       const error = event.data as { message?: string }
       setUpdate((current) => ({ ...current, phase: 'error', message: error.message || 'No se pudo completar la actualización.' }))
     })
@@ -163,6 +169,18 @@ function App() {
       stopReady()
       stopError()
     }
+  }, [state.version])
+
+  useEffect(() => {
+    // Look for a newer version once, quietly, when the app opens.
+    if (!state.version || launchCheckDone.current) return
+    launchCheckDone.current = true
+    LibraryService.CheckForUpdates().then((result) => {
+      if (!result.available) return
+      setUpdate((current) => current.phase === 'idle' || current.phase === 'up-to-date' || current.phase === 'available'
+        ? { ...current, phase: 'available', version: result.version, name: result.name, notes: result.notes }
+        : current)
+    }).catch(() => { /* offline or no release yet: the button still works */ })
   }, [state.version])
 
   useEffect(() => {
@@ -218,44 +236,24 @@ function App() {
 
   const notify = (message: string) => setToast(message)
 
+  // One click: the backend checks, downloads, verifies and restarts the app.
   const updateNow = async () => {
-    if (update.phase === 'checking' || update.phase === 'downloading' || update.phase === 'verifying' || update.phase === 'installing' || update.phase === 'ready' || update.phase === 'available') return
-    setUpdate({ phase: 'checking', currentVersion: state.version, written: 0, total: 0 })
+    if (updateRunning) return
+    updateRequested.current = true
+    setUpdateRunning(true)
+    setUpdate((current) => ({ ...current, phase: 'checking', currentVersion: state.version, written: 0, total: 0, message: '' }))
     try {
-      const result = await LibraryService.CheckForUpdates()
+      const result = await LibraryService.UpdateNow()
       if (!result.available) {
-        setUpdate({
-          phase: 'up-to-date',
-          currentVersion: result.currentVersion,
-          version: result.version,
-          written: 0,
-          total: 0,
-        })
+        setUpdate({ phase: 'up-to-date', currentVersion: result.currentVersion, version: result.version, written: 0, total: 0 })
+        setUpdateRunning(false)
         return
       }
-
-      setUpdate({
-        phase: 'downloading',
-        currentVersion: result.currentVersion,
-        version: result.version,
-        name: result.name,
-        notes: result.notes,
-        written: 0,
-        total: 0,
-      })
-      await LibraryService.DownloadUpdate()
-      setUpdate((current) => ({ ...current, phase: 'ready', version: result.version, name: result.name, notes: result.notes }))
-    } catch (error) {
-      setUpdate({ phase: 'error', currentVersion: state.version, written: 0, total: 0, message: displayError(error) })
-    }
-  }
-
-  const restartForUpdate = async () => {
-    if (update.phase !== 'ready') return
-    try {
-      await LibraryService.RestartUpdate()
+      // The app is closing to open again on the new version.
+      setUpdate((current) => ({ ...current, phase: 'restarting', version: result.version || current.version, name: result.name || current.name }))
     } catch (error) {
       setUpdate((current) => ({ ...current, phase: 'error', message: displayError(error) }))
+      setUpdateRunning(false)
     }
   }
 
@@ -450,7 +448,7 @@ function App() {
             <span><strong>Tu colección</strong><small>{state.tracks.length} canciones locales</small></span>
             <button className="icon-button tiny" onClick={() => void chooseFolders()} aria-label="Añadir carpeta"><Plus size={16} /></button>
           </div>
-          <button className={`nav-item settings-link ${view === 'settings' ? 'active' : ''}`} aria-label="Ajustes" aria-current={view === 'settings' ? 'page' : undefined} title="Ajustes" onClick={() => setView('settings')}><Settings2 size={18} /><span>Ajustes</span></button>
+          <button className={`nav-item settings-link ${view === 'settings' ? 'active' : ''}`} aria-label={update.phase === 'available' ? 'Ajustes, hay una versión nueva' : 'Ajustes'} aria-current={view === 'settings' ? 'page' : undefined} title={update.phase === 'available' ? 'Ajustes · versión nueva disponible' : 'Ajustes'} onClick={() => setView('settings')}><Settings2 size={18} /><span>Ajustes</span>{update.phase === 'available' && <i className="update-dot" aria-hidden="true" />}</button>
           <div className="sidebar-caption"><span className="status-dot" /> Música que ya es tuya.</div>
         </div>
       </aside>
@@ -474,7 +472,7 @@ function App() {
               {view === 'playlists' && <PlaylistPage playlists={state.playlists} onOpen={(id) => void loadPlaylist(id)} onCreate={() => setShowPlaylistForm(true)} />}
               {view === 'playlist' && <PlaylistDetail playlist={selectedPlaylistItem} tracks={queue} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track) => void playTrack(track, queue)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={refreshQueue} />}
               {view === 'queue' && <QueuePage tracks={queue} currentPath={playbackPath} onPlay={(track) => void playTrack(track, queue)} />}
-              {view === 'settings' && <SettingsPage state={state} activeTheme={activeTheme} editor={editor} imagePreview={imagePreview} update={update} onUpdate={() => void updateNow()} onRestartUpdate={() => void restartForUpdate()} onTheme={(theme) => void selectTheme(theme)} onEdit={setEditor} onSave={() => void saveTheme()} onImage={readBackground} onAudio={setAudioOptions} onChooseFolders={() => void chooseFolders()} onRemoveFolder={async (path) => { try { await LibraryService.RemoveMusicFolder(path); await refreshState() } catch (error) { notify(displayError(error)) } }} onRefresh={() => void startScan()} />}
+              {view === 'settings' && <SettingsPage state={state} activeTheme={activeTheme} editor={editor} imagePreview={imagePreview} update={update} updateRunning={updateRunning} onUpdate={() => void updateNow()} onTheme={(theme) => void selectTheme(theme)} onEdit={setEditor} onSave={() => void saveTheme()} onImage={readBackground} onAudio={setAudioOptions} onChooseFolders={() => void chooseFolders()} onRemoveFolder={async (path) => { try { await LibraryService.RemoveMusicFolder(path); await refreshState() } catch (error) { notify(displayError(error)) } }} onRefresh={() => void startScan()} />}
             </motion.section>
           </AnimatePresence>
         </div>
@@ -556,7 +554,7 @@ function QueuePage({ tracks, currentPath, onPlay, onClose }: { tracks: Track[]; 
   return <div className={onClose ? 'queue-panel' : ''}><div className="queue-heading"><h2>Cola de reproducción</h2>{onClose && <button className="icon-button" onClick={onClose} aria-label="Cerrar cola"><X size={17} /></button>}</div><p className="queue-caption">{tracks.length} canciones · solo para esta sesión</p>{tracks.length ? <div className="queue-list">{tracks.map((track, index) => <button className={`queue-row ${track.path === currentPath ? 'current' : ''}`} key={`${track.id}-${index}`} onClick={() => onPlay(track)}><span className="queue-index">{String(index + 1).padStart(2, '0')}</span><span className="queue-cover" style={coverStyle(track, index)}>{track.coverUrl ? null : <Music2 size={14} />}</span><span><strong>{track.title}</strong><small>{track.artist}</small></span><span className="queue-duration">{formatDuration(track.durationSeconds)}</span></button>)}</div> : <div className="queue-empty"><span className="empty-icon"><Shuffle size={21} /></span><p>Reproduce una canción para empezar a llenar tu cola.</p></div>}</div>
 }
 
-function SettingsPage({ state, activeTheme, editor, imagePreview, update, onUpdate, onRestartUpdate, onTheme, onEdit, onSave, onImage, onAudio, onChooseFolders, onRemoveFolder, onRefresh }: { state: AppState; activeTheme: Theme; editor: Theme; imagePreview: string; update: UpdateInfo; onUpdate: () => void; onRestartUpdate: () => void; onTheme: (id: string) => void; onEdit: (theme: Theme) => void; onSave: () => void; onImage: (file?: File) => void; onAudio: (mode: string, deviceID: string, enabled: boolean, bands: number[]) => void; onChooseFolders: () => void; onRemoveFolder: (path: string) => void; onRefresh: () => void }) {
+function SettingsPage({ state, activeTheme, editor, imagePreview, update, updateRunning, onUpdate, onTheme, onEdit, onSave, onImage, onAudio, onChooseFolders, onRemoveFolder, onRefresh }: { state: AppState; activeTheme: Theme; editor: Theme; imagePreview: string; update: UpdateInfo; updateRunning: boolean; onUpdate: () => void; onTheme: (id: string) => void; onEdit: (theme: Theme) => void; onSave: () => void; onImage: (file?: File) => void; onAudio: (mode: string, deviceID: string, enabled: boolean, bands: number[]) => void; onChooseFolders: () => void; onRemoveFolder: (path: string) => void; onRefresh: () => void }) {
   const [name, setName] = useState(editor.name || 'Mi tema')
   const playback = usePlayback((current) => current)
   const outputMode = playback.outputMode || 'shared'
@@ -564,25 +562,27 @@ function SettingsPage({ state, activeTheme, editor, imagePreview, update, onUpda
   const [eqEnabled, setEqEnabled] = useState(playback.equalizerOn)
   const [bands, setBands] = useState<number[]>(playback.equalizer.length === 3 ? playback.equalizer : [0, 0, 0])
   const patchTheme = (key: keyof Theme, value: string) => onEdit({ ...editor, [key]: value })
-  const updateBusy = update.phase === 'checking' || update.phase === 'available' || update.phase === 'downloading' || update.phase === 'verifying' || update.phase === 'installing'
+  const updateBusy = updateRunning
   const updateActionLabel = update.phase === 'checking' ? 'Buscando…'
     : update.phase === 'downloading' ? 'Descargando…'
       : update.phase === 'verifying' ? 'Verificando…'
-        : update.phase === 'installing' ? 'Preparando…'
-          : update.phase === 'error' ? 'Intentar de nuevo'
-            : update.phase === 'up-to-date' ? 'Buscar de nuevo'
-              : update.phase === 'available' ? 'Iniciando descarga…'
-                : 'Actualizar'
+        : update.phase === 'installing' || update.phase === 'ready' ? 'Preparando…'
+          : update.phase === 'restarting' ? 'Reiniciando…'
+            : update.phase === 'error' ? 'Intentar de nuevo'
+              : update.phase === 'up-to-date' ? 'Buscar de nuevo'
+                : update.phase === 'available' ? `Actualizar${update.version ? ` a v${update.version}` : ''}`
+                  : 'Actualizar'
   const updatePercent = update.total > 0 ? Math.min(100, Math.floor((update.written / update.total) * 100)) : 0
   const updateMessage: Record<UpdatePhase, string> = {
     idle: 'Busca una versión nueva cuando quieras.',
     checking: 'Buscando una versión nueva…',
     'up-to-date': `Música Nativa está al día · v${update.currentVersion}`,
-    available: `Hay una versión nueva${update.version ? ` · v${update.version}` : ''}. Iniciando descarga…`,
+    available: `Hay una versión nueva${update.version ? ` · v${update.version}` : ''}. Al actualizar, la app se reinicia sola.`,
     downloading: 'Descargando la actualización…',
     verifying: 'Verificando el archivo descargado…',
     installing: 'Preparando el reemplazo…',
-    ready: `La versión ${update.version ? `v${update.version}` : ''} está lista para instalar.`,
+    ready: 'Preparando el reinicio…',
+    restarting: 'Reiniciando Música Nativa con la versión nueva…',
     error: update.message || 'No se pudo completar la actualización.',
   }
   return <><PageHeading title="Ajustes" subtitle="Dale a tu biblioteca el ambiente que quieras y ajusta cómo suena." />
@@ -590,7 +590,7 @@ function SettingsPage({ state, activeTheme, editor, imagePreview, update, onUpda
 
     <section className="settings-section editor-section"><div className="settings-section-title"><span className="settings-icon"><SlidersHorizontal size={18} /></span><div><h2>Diseña un tema</h2><p>Escoge colores y una imagen para personalizarlo.</p></div></div><div className="theme-editor"><div className="editor-preview" style={{ background: editor.background, backgroundImage: imagePreview || editor.backgroundImage ? `linear-gradient(180deg, rgba(0,0,0,.08), ${editor.background}d9), url("${imagePreview || editor.backgroundImage}")` : undefined }}><div className="editor-cover" style={coverStyle(undefined, 0)}><Disc3 size={29} /></div><div className="editor-playing"><strong>Una forma propia</strong><small>Tu música, a tu manera</small></div><div className="editor-controls"><span /><span /><span /></div></div><div className="editor-fields"><label className="field-label">Nombre del tema<input value={name} onChange={(event) => { setName(event.target.value); patchTheme('name', event.target.value) }} placeholder="Mi tema" maxLength={32} /></label><div className="color-fields"><ColorField label="Fondo" value={editor.background} onChange={(value) => patchTheme('background', value)} /><ColorField label="Acento" value={editor.accent} onChange={(value) => patchTheme('accent', value)} /><ColorField label="Superficie" value={editor.surface} onChange={(value) => patchTheme('surface', value)} /><ColorField label="Texto" value={editor.text} onChange={(value) => patchTheme('text', value)} /></div><label className="image-upload"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onImage(event.target.files?.[0])} /><span className="upload-icon"><FolderPlus size={16} /></span><span><strong>Usar imagen de fondo</strong><small>JPG, PNG o WebP · máximo 8 MB</small></span><ArrowUpRight size={15} /></label><button className="primary-button save-theme-button" onClick={onSave}><Check size={15} /> Guardar tema</button></div></div></section>
 
-    <section className="settings-section updates-section"><div className="settings-section-title"><span className="settings-icon"><RefreshCw size={18} /></span><div><h2>Actualizaciones</h2><p>Un botón busca y descarga versiones nuevas.</p></div><span className="settings-tag">VERSIÓN {state.version}</span></div><div className="update-panel"><div className={`update-indicator ${update.phase}`}><span /></div><div className="update-copy"><strong>{update.name || 'Música Nativa'}</strong><p role="status">{updateMessage[update.phase]}</p>{update.notes && (update.phase === 'available' || update.phase === 'ready') && <pre className="update-notes">{update.notes}</pre>}{update.phase === 'downloading' && <div className="update-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={updatePercent}><span style={{ width: `${updatePercent}%` }} /></div>}</div><div className="update-actions">{update.phase === 'ready' ? <button className="primary-button compact-button" onClick={onRestartUpdate}><RefreshCw size={14} /> Reiniciar y actualizar</button> : <button className="secondary-button compact-button" onClick={onUpdate} disabled={updateBusy}>{updateBusy ? <span className="update-spinner" /> : <RefreshCw size={14} />}{updateActionLabel}</button>}</div></div></section>
+    <section className="settings-section updates-section"><div className="settings-section-title"><span className="settings-icon"><RefreshCw size={18} /></span><div><h2>Actualizaciones</h2><p>Un botón instala la versión nueva y reinicia la app.</p></div><span className="settings-tag">VERSIÓN {state.version}</span></div><div className="update-panel"><div className={`update-indicator ${update.phase}`}><span /></div><div className="update-copy"><strong>{update.name || 'Música Nativa'}</strong><p role="status">{updateMessage[update.phase]}</p>{update.notes && (update.phase === 'available' || update.phase === 'ready' || update.phase === 'restarting') && <pre className="update-notes">{update.notes}</pre>}{update.phase === 'downloading' && <div className="update-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={updatePercent}><span style={{ width: `${updatePercent}%` }} /></div>}</div><div className="update-actions"><button className={`${update.phase === 'available' ? 'primary-button' : 'secondary-button'} compact-button`} onClick={onUpdate} disabled={updateBusy}>{updateBusy ? <span className="update-spinner" /> : <RefreshCw size={14} />}{updateActionLabel}</button></div></div></section>
 
     <section className="settings-section"><div className="settings-section-title"><span className="settings-icon"><AudioLines size={18} /></span><div><h2>Audio</h2><p>Elige la salida y ajusta el ecualizador opcional.</p></div><span className={`output-status ${playback.outputReady ? 'ready' : ''}`}><i />{playback.outputReady ? 'DISPOSITIVO LISTO' : 'AUDIO SIN CONECTAR'}</span></div><div className="audio-settings"><div className="output-setting"><div><strong>Modo de salida</strong><small>Compartido funciona con otras aplicaciones. Exclusivo intenta reservar el dispositivo.</small></div><div className="mode-switch"><button className={outputMode === 'shared' ? 'active' : ''} onClick={() => onAudio('shared', deviceID, eqEnabled, bands)}>Compartido</button><button className={outputMode === 'exclusive' ? 'active' : ''} onClick={() => onAudio('exclusive', deviceID, eqEnabled, bands)}>Exclusivo</button></div></div><div className="output-setting device-setting"><div><strong>Dispositivo de salida</strong><small>Predeterminado sigue el dispositivo de audio elegido en Windows.</small></div><select aria-label="Dispositivo de salida" className="device-select" value={deviceID} onChange={(event) => onAudio(outputMode, event.target.value, eqEnabled, bands)}><option value="">Predeterminado de Windows</option>{state.outputDevices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.default ? ' · predeterminado' : ''}</option>)}</select></div><div className="eq-setting"><div className="eq-title"><div><strong>Ecualizador de 3 bandas</strong><small>El ajuste predeterminado conserva el sonido original.</small></div><button role="switch" aria-checked={eqEnabled} className={`toggle-switch ${eqEnabled ? 'on' : ''}`} onClick={() => { const next = !eqEnabled; setEqEnabled(next); onAudio(outputMode, deviceID, next, bands) }}><span /></button></div><div className={`eq-bands ${eqEnabled ? '' : 'disabled'}`}>{['Graves', 'Medios', 'Agudos'].map((label, index) => <label className="eq-band" key={label}><span>{label}<small>{bands[index] > 0 ? '+' : ''}{bands[index]} dB</small></span><input type="range" min={-12} max={12} step={1} value={bands[index]} disabled={!eqEnabled} onChange={(event) => { const next = [...bands]; next[index] = Number(event.target.value); setBands(next); onAudio(outputMode, deviceID, eqEnabled, next) }} style={{ accentColor: activeTheme.accent }} /><small>{index === 0 ? '100 Hz' : index === 1 ? '1 kHz' : '10 kHz'}</small></label>)}</div></div>{playback.error && <p className="audio-message"><span />{playback.error}</p>}</div></section>
 

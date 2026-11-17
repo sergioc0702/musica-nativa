@@ -31,6 +31,10 @@ export function ApplyTheme(themeID: string): $CancellablePromise<void> {
     return $Call.ByID(278371055, themeID);
 }
 
+/**
+ * CheckForUpdates only looks for a newer version; it never downloads. The
+ * interface runs it when the app opens to show that an update is available.
+ */
 export function CheckForUpdates(): $CancellablePromise<$models.UpdateCheckResult> {
     return $Call.ByID(1347291861).then(($result: any) => {
         return $$createType1($result);
@@ -51,10 +55,6 @@ export function CreatePlaylist(name: string): $CancellablePromise<$models.Playli
 
 export function DeletePlaylist(id: string): $CancellablePromise<void> {
     return $Call.ByID(2018893399, id);
-}
-
-export function DownloadUpdate(): $CancellablePromise<void> {
-    return $Call.ByID(3025975391);
 }
 
 export function GetPlaylistTracks(playlistID: string): $CancellablePromise<library$0.Track[]> {
@@ -95,10 +95,6 @@ export function RemoveMusicFolder(path: string): $CancellablePromise<void> {
 
 export function RemoveTrackFromPlaylist(playlistID: string, trackID: string): $CancellablePromise<void> {
     return $Call.ByID(970681807, playlistID, trackID);
-}
-
-export function RestartUpdate(): $CancellablePromise<void> {
-    return $Call.ByID(1114513584);
 }
 
 export function SaveTheme(theme: $models.Theme): $CancellablePromise<$models.ThemeSaveResult> {
@@ -151,6 +147,18 @@ export function ToggleFavorite(trackID: string): $CancellablePromise<void> {
 export function TogglePlayback(): $CancellablePromise<$models.PlaybackState> {
     return $Call.ByID(1738909299).then(($result: any) => {
         return $$createType7($result);
+    });
+}
+
+/**
+ * UpdateNow is the one-click update: when a newer version exists it downloads
+ * and verifies it, pauses playback and restarts the app into it. An update
+ * that was already downloaded is applied straight away. When the app is up to
+ * date nothing else happens.
+ */
+export function UpdateNow(): $CancellablePromise<$models.UpdateCheckResult> {
+    return $Call.ByID(806399569).then(($result: any) => {
+        return $$createType1($result);
     });
 }
 

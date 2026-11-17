@@ -17,6 +17,15 @@ type UpdateCheckResult struct {
 	Notes          string `json:"notes,omitempty"`
 }
 
+// updateSource is the part of the Wails updater (*updater.Updater) that the
+// service drives.
+type updateSource interface {
+	State() updater.State
+	Check(ctx context.Context) (*updater.Release, error)
+	DownloadAndInstall(ctx context.Context) error
+	Restart(ctx context.Context) error
+}
+
 func configureUpdates(app *application.App) error {
 	provider, err := github.New(github.Config{
 		Repository:    updateRepository,
@@ -32,8 +41,33 @@ func configureUpdates(app *application.App) error {
 	})
 }
 
+// CheckForUpdates only looks for a newer version; it never downloads. The
+// interface runs it when the app opens to show that an update is available.
 func (s *LibraryService) CheckForUpdates() (UpdateCheckResult, error) {
-	app, err := s.updateApp()
+	updates, err := s.updateSource()
+	if err != nil {
+		return UpdateCheckResult{}, err
+	}
+	if !s.updateMu.TryLock() {
+		return UpdateCheckResult{}, fmt.Errorf("ya hay una actualización en curso")
+	}
+	defer s.updateMu.Unlock()
+	if state := updates.State(); updateInProgress(state) || state == updater.StateReady {
+		return UpdateCheckResult{}, fmt.Errorf("termina la actualización actual antes de buscar otra")
+	}
+	release, err := updates.Check(context.Background())
+	if err != nil {
+		return UpdateCheckResult{}, err
+	}
+	return checkResult(release), nil
+}
+
+// UpdateNow is the one-click update: when a newer version exists it downloads
+// and verifies it, pauses playback and restarts the app into it. An update
+// that was already downloaded is applied straight away. When the app is up to
+// date nothing else happens.
+func (s *LibraryService) UpdateNow() (UpdateCheckResult, error) {
+	updates, err := s.updateSource()
 	if err != nil {
 		return UpdateCheckResult{}, err
 	}
@@ -42,17 +76,31 @@ func (s *LibraryService) CheckForUpdates() (UpdateCheckResult, error) {
 	}
 	defer s.updateMu.Unlock()
 
-	switch app.Updater.State() {
-	case updater.StateChecking, updater.StateDownloading, updater.StateVerifying, updater.StateInstalling, updater.StateReady:
-		return UpdateCheckResult{}, fmt.Errorf("termina la actualización actual antes de buscar otra")
+	ctx := context.Background()
+	result := checkResult(nil)
+	switch state := updates.State(); {
+	case state == updater.StateReady:
+		result.Available = true
+	case updateInProgress(state):
+		return result, fmt.Errorf("termina la actualización actual antes de empezar otra")
+	default:
+		release, err := updates.Check(ctx)
+		if err != nil || release == nil {
+			return result, err
+		}
+		result = checkResult(release)
+		if err := updates.DownloadAndInstall(ctx); err != nil {
+			return result, err
+		}
 	}
+	// Stop the music cleanly instead of cutting it off when the app quits.
+	s.player.Pause()
+	return result, updates.Restart(ctx)
+}
 
-	release, err := app.Updater.Check(context.Background())
-	if err != nil {
-		return UpdateCheckResult{}, err
-	}
+func checkResult(release *updater.Release) UpdateCheckResult {
 	if release == nil {
-		return UpdateCheckResult{CurrentVersion: appVersion, Version: appVersion}, nil
+		return UpdateCheckResult{CurrentVersion: appVersion, Version: appVersion}
 	}
 	return UpdateCheckResult{
 		CurrentVersion: appVersion,
@@ -60,38 +108,20 @@ func (s *LibraryService) CheckForUpdates() (UpdateCheckResult, error) {
 		Version:        release.Version,
 		Name:           release.Name,
 		Notes:          release.Notes,
-	}, nil
+	}
 }
 
-func (s *LibraryService) DownloadUpdate() error {
-	app, err := s.updateApp()
-	if err != nil {
-		return err
+func updateInProgress(state updater.State) bool {
+	switch state {
+	case updater.StateChecking, updater.StateDownloading, updater.StateVerifying, updater.StateInstalling:
+		return true
 	}
-	if !s.updateMu.TryLock() {
-		return fmt.Errorf("la descarga de una actualización ya está en curso")
-	}
-	defer s.updateMu.Unlock()
-	if app.Updater.State() != updater.StateAvailable {
-		return fmt.Errorf("primero busca una actualización disponible")
-	}
-	return app.Updater.DownloadAndInstall(context.Background())
+	return false
 }
 
-func (s *LibraryService) RestartUpdate() error {
-	app, err := s.updateApp()
-	if err != nil {
-		return err
-	}
-	if app.Updater.State() != updater.StateReady {
-		return fmt.Errorf("todavía no hay una actualización lista para aplicar")
-	}
-	return app.Updater.Restart(context.Background())
-}
-
-func (s *LibraryService) updateApp() (*application.App, error) {
-	if s.app == nil || s.app.Updater == nil {
+func (s *LibraryService) updateSource() (updateSource, error) {
+	if s.updates == nil {
 		return nil, fmt.Errorf("el servicio de actualizaciones no está disponible")
 	}
-	return s.app, nil
+	return s.updates, nil
 }

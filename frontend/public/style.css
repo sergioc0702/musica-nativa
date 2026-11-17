@@ -71,7 +71,8 @@ input { caret-color: var(--accent); }
 .sidebar-library-card strong { overflow: hidden; font-size: var(--type-ui); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-library-card small { color: var(--muted); font-size: var(--type-caption); }
 .sidebar-library-orb { display: grid; width: 29px; height: 29px; flex: 0 0 auto; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: var(--accent); }
-.settings-link { margin-top: 13px; }
+.settings-link { position: relative; margin-top: 13px; }
+.update-dot { width: 7px; height: 7px; flex: 0 0 auto; margin-left: auto; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .sidebar-caption { display: flex; align-items: center; gap: 7px; margin: 18px 9px 0; color: var(--muted); font-size: var(--type-caption); }
 .status-dot, .toast-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
 
@@ -392,7 +393,7 @@ input { caret-color: var(--accent); }
 .device-select option { background: var(--surface-raised); color: var(--text); }
 .update-panel { display: grid; grid-template-columns: 8px minmax(0,1fr) auto; align-items: center; gap: 13px; padding: 15px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface) 58%, transparent); }
 .update-indicator { display: grid; width: 8px; height: 8px; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--muted) 70%, transparent); }
-.update-indicator.available, .update-indicator.ready { background: var(--accent); box-shadow: 0 0 11px color-mix(in srgb, var(--accent) 45%, transparent); }
+.update-indicator.available, .update-indicator.ready, .update-indicator.restarting { background: var(--accent); box-shadow: 0 0 11px color-mix(in srgb, var(--accent) 45%, transparent); }
 .update-indicator.up-to-date { background: #9cc39a; }
 .update-indicator.error { background: #df877c; }
 .update-copy { min-width: 0; }
@@ -432,6 +433,7 @@ input { caret-color: var(--accent); }
   .sidebar-section-heading { justify-content: center; padding: 0 0 7px; }
   .sidebar-bottom { width: 100%; flex-shrink: 0; }
   .settings-link { margin-top: 8px; }
+  .settings-link .update-dot { position: absolute; top: 8px; right: 9px; margin: 0; }
   .page-content { padding-right: 24px; padding-left: 24px; }
   .topbar { gap: 10px; padding-right: 16px; padding-left: 16px; }
   .history-controls { gap: 2px; }
