@@ -21,13 +21,13 @@ jobs:
     name: Windows amd64
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -37,19 +37,16 @@ jobs:
       - uses: msys2/setup-msys2@v2
         id: msys2
         with:
-          msystem: MINGW64
-          install: mingw-w64-x86_64-gcc
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc
           path-type: inherit
 
       - name: Usar el compilador de MinGW
         shell: pwsh
-        run: Add-Content -Path $env:GITHUB_PATH -Value "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin"
+        run: Add-Content -Path $env:GITHUB_PATH -Value "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"
 
       - name: Instalar Wails CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
-
-      - name: Tests
-        run: go test ./...
 
       - name: Compilar y empaquetar
         shell: powershell
@@ -61,8 +58,12 @@ jobs:
           .\scripts\prepare-release.ps1 -Version $version
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # After packaging: the main package embeds frontend/dist, built above.
+      - name: Tests
+        run: go test ./...
+
       - name: Guardar los archivos del build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: musica-nativa-v${{ env.VERSION }}
           path: bin/releases/v${{ env.VERSION }}/
