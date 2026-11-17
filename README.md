@@ -22,17 +22,27 @@ La app se abre maximizada y puedes restaurarla y cambiar su tamaño. El tamaño 
 
 ## Actualizaciones dentro de la app
 
-En **Ajustes > Actualizaciones**, pulsa **Actualizar**. La app busca y descarga automáticamente la versión nueva; al terminar, pulsa **Reiniciar y actualizar** para aplicarla. La app verifica el SHA-256 publicado junto con el ejecutable; tu biblioteca y tus preferencias se conservan.
+Al abrirse, la app comprueba si hay una versión nueva y, si la hay, marca **Ajustes** con un punto; no descarga nada por su cuenta. En **Ajustes > Actualizaciones**, pulsa **Actualizar**: la app descarga la versión nueva, verifica el SHA-256 publicado junto con el ejecutable, pausa la música y se reinicia ya actualizada. Tu biblioteca y tus preferencias se conservan.
 
 Las versiones se buscan en el repositorio público [`sergioc0702/musica-nativa`](https://github.com/sergioc0702/musica-nativa): el botón solo encuentra las versiones publicadas allí como release.
 
-Para preparar los archivos de un release:
+### Publicar una versión
 
-1. Pon la misma versión `x.y.z` en `version.go`, `build/config.yml` y `scripts/install.ps1`. Las propiedades del `.exe` en Windows toman la versión de `version.go`.
-2. Ejecuta `.\scripts\prepare-release.ps1 -Version x.y.z`.
-3. Crea el release público `vX.Y.Z` y adjunta los tres archivos generados en `bin/releases/vX.Y.Z`: `musica-nativa-windows-amd64.exe`, `Musica-Nativa-Setup-vX.Y.Z.exe` y `SHA256SUMS`.
+GitHub Actions compila, prueba y publica cada versión (`.github/workflows/release.yml`):
 
-El primer ejecutable sirve para actualizaciones desde la app; el instalador sirve para instalaciones nuevas.
+1. Cambia la versión con `.\scripts\set-version.ps1 -Version x.y.z`; actualiza `version.go`, `build/config.yml` y `scripts/install.ps1`. Las propiedades del `.exe` en Windows toman la versión de `version.go`.
+2. Opcional: escribe las notas del release en `docs/releases/vX.Y.Z.md`. Sin ese archivo, GitHub genera la lista de cambios.
+3. Haz commit, crea la etiqueta y súbelas:
+
+   ```powershell
+   git commit -am "Versión x.y.z"
+   git tag vX.Y.Z
+   git push origin master vX.Y.Z
+   ```
+
+Al recibir la etiqueta, el flujo publica el release `vX.Y.Z` con `musica-nativa-windows-amd64.exe` (lo que descarga el actualizador), `Musica-Nativa-Setup-vX.Y.Z.exe` (para instalaciones nuevas) y `SHA256SUMS`. Cada push a `master` también compila y prueba la app, y guarda esos archivos 14 días como artefacto del flujo.
+
+Para generar los mismos archivos en tu equipo sin publicar nada, ejecuta `.\scripts\prepare-release.ps1 -Version x.y.z`; quedan en `bin/releases/vX.Y.Z`.
 
 ## Desarrollo
 

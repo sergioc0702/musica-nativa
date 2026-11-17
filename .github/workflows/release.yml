@@ -1,0 +1,85 @@
+name: Compilar y publicar
+
+# Every push to master builds, tests and packages the Windows app, keeping the
+# files as a downloadable artifact. Pushing a tag vX.Y.Z also publishes them
+# as the GitHub release that the in-app updater reads.
+on:
+  push:
+    branches: [master]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows amd64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # CGO (miniaudio) needs a MinGW-w64 C compiler.
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: Usar el compilador de MinGW
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin"
+
+      - name: Instalar Wails CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+
+      - name: Tests
+        run: go test ./...
+
+      - name: Compilar y empaquetar
+        shell: powershell
+        run: |
+          $version = (Select-String -Path version.go -Pattern 'appVersion = "([^"]+)"').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "La etiqueta $env:GITHUB_REF_NAME no coincide con version.go ($version)."
+          }
+          .\scripts\prepare-release.ps1 -Version $version
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Guardar los archivos del build
+        uses: actions/upload-artifact@v4
+        with:
+          name: musica-nativa-v${{ env.VERSION }}
+          path: bin/releases/v${{ env.VERSION }}/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publicar el release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $files = Get-ChildItem "bin/releases/$tag" -File | ForEach-Object FullName
+          $notes = "docs/releases/$tag.md"
+          if (Test-Path $notes) {
+            gh release create $tag @files --verify-tag --title "Música Nativa $env:VERSION" --notes-file $notes
+          } else {
+            gh release create $tag @files --verify-tag --title "Música Nativa $env:VERSION" --generate-notes
+          }
