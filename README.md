@@ -64,6 +64,8 @@ wails3 task package
 
 El ejecutable de desarrollo queda en `bin/musica-nativa.exe`. El instalador queda en `bin/Musica-Nativa-Setup-*.exe`.
 
+La librería de audio `malgo` se usa desde `third_party/malgo`, una copia con un parche que evita que la app se bloquee cuando el dispositivo de audio está ocupado; [`third_party/malgo/MUSICA-NATIVA.md`](third_party/malgo/MUSICA-NATIVA.md) explica el cambio y cómo actualizarla.
+
 ## Datos locales
 
 La base de datos, las preferencias, los temas y los metadatos de la biblioteca se guardan en `%APPDATA%\MusicaNativa\library.db`. Al desinstalar se conserva esta carpeta para no borrar playlists ni preferencias.
