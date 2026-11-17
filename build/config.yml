@@ -1,0 +1,43 @@
+version: '3'
+
+info:
+  companyName: "Música Nativa"
+  productName: "Música Nativa"
+  productIdentifier: "com.musicanativa.player"
+  description: "Reproductor de música local para Windows"
+  copyright: "© 2026 Música Nativa"
+  comments: "Tu colección local, con temas a tu manera."
+  version: "1.0.0"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 700
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend
+      - bin
+    file:
+      - .DS_Store
+      - .gitignore
+      - .gitkeep
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: wails3 task common:install:frontend:deps
+      type: once
+    - cmd: wails3 task common:dev:frontend
+      type: background
+    - cmd: go mod tidy
+      type: blocking
+    - cmd: wails3 task build
+      type: blocking
+    - cmd: wails3 task run
+      type: primary
+
+fileAssociations:
+
+other: []

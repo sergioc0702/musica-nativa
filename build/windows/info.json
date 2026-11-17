@@ -1,0 +1,15 @@
+{
+  "fixed": {
+    "file_version": "1.0.0"
+  },
+  "info": {
+    "0000": {
+      "ProductVersion": "1.0.0",
+      "CompanyName": "Música Nativa",
+      "FileDescription": "Reproductor de música local",
+      "LegalCopyright": "© 2026 Música Nativa",
+      "ProductName": "Música Nativa",
+      "Comments": "Tu colección local, con temas a tu manera."
+    }
+  }
+}

@@ -1,0 +1,31 @@
+version: '3'
+
+vars:
+  APP_NAME: "musica-nativa"
+  BIN_DIR: "bin"
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+
+tasks:
+  build:
+    summary: Builds Música Nativa for Windows
+    cmds:
+      - task: windows:build
+
+  package:
+    summary: Creates the Windows installer
+    cmds:
+      - task: windows:package
+
+  run:
+    summary: Runs the Windows application
+    cmds:
+      - task: windows:run
+
+  dev:
+    summary: Starts Wails with Vite hot reload
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}

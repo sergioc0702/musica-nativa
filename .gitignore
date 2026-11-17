@@ -1,0 +1,20 @@
+# Generated Wails task files and local builds
+.task/
+.wails/
+bin/
+frontend/dist/
+frontend/node_modules/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and operating system files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Local browser-testing logs
+.playwright-cli/
