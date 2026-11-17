@@ -63,7 +63,7 @@ tasks:
     summary: Generates Windows `.syso` file
     dir: build
     cmds:
-      - go run ../cmd/resourcegen -arch {{.ARCH}} -icon windows/icon.ico -info windows/info.json -out ../wails_windows_{{.ARCH}}.syso
+      - go run ../cmd/resourcegen -arch {{.ARCH}} -icon windows/icon.ico -info windows/info.json -version ../version.go -out ../wails_windows_{{.ARCH}}.syso
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
 

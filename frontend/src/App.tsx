@@ -17,10 +17,10 @@ type View = 'home' | 'tracks' | 'albums' | 'artists' | 'favorites' | 'playlists'
 type UpdatePhase = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'installing' | 'ready' | 'error'
 type UpdateInfo = { phase: UpdatePhase; currentVersion: string; version?: string; name?: string; notes?: string; written: number; total: number; message?: string }
 
-const defaultUpdate: UpdateInfo = { phase: 'idle', currentVersion: '1.0.0', written: 0, total: 0 }
+const defaultUpdate: UpdateInfo = { phase: 'idle', currentVersion: '', written: 0, total: 0 }
 
 const emptyState: AppState = {
-  version: '1.0.0', tracks: [], folders: [], playlists: [], themes: [], outputDevices: [], activeTheme: 'nocturno',
+  version: '', tracks: [], folders: [], playlists: [], themes: [], outputDevices: [], activeTheme: 'nocturno',
   playback: { path: '', isPlaying: false, positionMs: 0, durationMs: 0, volume: 72, outputMode: 'shared', deviceID: '', outputReady: false, equalizerOn: false, equalizer: [0, 0, 0] },
   scanning: false,
 }

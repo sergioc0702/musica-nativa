@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $expectedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs\Musica Nativa')).TrimEnd('\')
 $installRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')

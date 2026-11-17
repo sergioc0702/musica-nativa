@@ -24,11 +24,11 @@ La app se abre maximizada y puedes restaurarla y cambiar su tamaño. El tamaño 
 
 En **Ajustes > Actualizaciones**, pulsa **Actualizar**. La app busca y descarga automáticamente la versión nueva; al terminar, pulsa **Reiniciar y actualizar** para aplicarla. La app verifica el SHA-256 publicado junto con el ejecutable; tu biblioteca y tus preferencias se conservan.
 
-Las versiones se buscarán en el repositorio público `sergioc0702/musica-nativa`. Ese repositorio todavía debe crearse y recibir su primer release; antes de eso, el botón no encontrará un canal disponible.
+Las versiones se buscan en el repositorio público [`sergioc0702/musica-nativa`](https://github.com/sergioc0702/musica-nativa): el botón solo encuentra las versiones publicadas allí como release.
 
 Para preparar los archivos de un release:
 
-1. Pon la misma versión `x.y.z` en `version.go`, `build/config.yml` y `scripts/install.ps1`.
+1. Pon la misma versión `x.y.z` en `version.go`, `build/config.yml` y `scripts/install.ps1`. Las propiedades del `.exe` en Windows toman la versión de `version.go`.
 2. Ejecuta `.\scripts\prepare-release.ps1 -Version x.y.z`.
 3. Crea el release público `vX.Y.Z` y adjunta los tres archivos generados en `bin/releases/vX.Y.Z`: `musica-nativa-windows-amd64.exe`, `Musica-Nativa-Setup-vX.Y.Z.exe` y `SHA256SUMS`.
 
