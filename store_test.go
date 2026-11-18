@@ -85,6 +85,34 @@ func TestStorePersistsTracksFavoritesPlaylistsAndThemes(t *testing.T) {
 	}
 }
 
+func TestOpenStoreRefreshesBuiltInThemeColors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.db")
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Colors saved by an earlier version of the app.
+	if _, err := store.db.Exec(`UPDATE themes SET accent='#e7a878', background='#11110f' WHERE id='nocturno'`); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	store, err = OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	themes, err := store.Themes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, theme := range themes {
+		if theme.ID == "nocturno" && (theme.Accent != "#ff7a59" || theme.Background != "#121214") {
+			t.Fatalf("nocturno kept old colors: %+v", theme)
+		}
+	}
+}
+
 func TestStoreSearchesTracksAndMarksMissingRoots(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()

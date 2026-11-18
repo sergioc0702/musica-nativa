@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Events } from '@wailsio/runtime'
 import {
-  ArrowLeft, ArrowRight, AudioLines, Check, ChevronDown, Clock3, Disc3, Ellipsis, Heart, Home,
+  AudioLines, Check, Clock3, Disc3, Ellipsis, Heart, Home, PanelRight,
   Library, ListMusic, Mic2, Music2, Pause, Play, Plus, Search, Settings2,
   Shuffle, SkipBack, SkipForward, SlidersHorizontal, Volume2, X,
-  FolderPlus, RefreshCw, Sparkles, Headphones, ArrowUpRight, Trash2,
+  FolderPlus, RefreshCw, Sparkles, ArrowUpRight, Trash2,
 } from 'lucide-react'
 import { LibraryService } from '../bindings/musica-nativa'
 import type { AppState, PlaybackState, ScanProgress, Theme } from '../bindings/musica-nativa/models'
@@ -13,6 +13,7 @@ import type { Track } from '../bindings/musica-nativa/internal/library/models'
 import '../bindings/events'
 import { getPlayback, setPlayback, usePlayback } from './playback'
 
+type AlbumGroup = { key: string; name: string; artist: string; tracks: Track[] }
 type View = 'home' | 'tracks' | 'albums' | 'artists' | 'favorites' | 'playlists' | 'queue' | 'settings' | 'playlist'
 type UpdatePhase = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'installing' | 'ready' | 'restarting' | 'error'
 type UpdateInfo = { phase: UpdatePhase; currentVersion: string; version?: string; name?: string; notes?: string; written: number; total: number; message?: string }
@@ -26,8 +27,8 @@ const emptyState: AppState = {
 }
 
 const defaultTheme: Theme = {
-  id: 'nocturno', name: 'Nocturno', background: '#11110f', accent: '#e7a878',
-  surface: '#1b1b18', text: '#f4f0e8', muted: '#969188', builtIn: true,
+  id: 'nocturno', name: 'Nocturno', background: '#121214', accent: '#ff7a59',
+  surface: '#1d1d21', text: '#f4f4f6', muted: '#a1a1aa', builtIn: true,
 }
 
 const navItems: { id: View; label: string; icon: typeof Home }[] = [
@@ -81,6 +82,10 @@ function App() {
   const updateRequested = useRef(false)
   const launchCheckDone = useRef(false)
   const [showQueue, setShowQueue] = useState(false)
+  const [showNowPlaying, setShowNowPlaying] = useState(() => {
+    try { return localStorage.getItem('mn-now-panel') !== 'off' } catch { return true }
+  })
+  const [playQueue, setPlayQueue] = useState<Track[]>([])
   const [showPlaylistForm, setShowPlaylistForm] = useState(false)
   const [playlistTarget, setPlaylistTarget] = useState<Track | null>(null)
   const [playlistName, setPlaylistName] = useState('')
@@ -199,6 +204,13 @@ function App() {
     [state.activeTheme, state.themes],
   )
   const playbackPath = usePlayback((playback) => playback.path)
+  useEffect(() => {
+    try { localStorage.setItem('mn-now-panel', showNowPlaying ? 'on' : 'off') } catch { /* private window */ }
+  }, [showNowPlaying])
+  useEffect(() => {
+    if (!playbackPath) return
+    LibraryService.Queue().then(setPlayQueue).catch(() => setPlayQueue([]))
+  }, [playbackPath, queue])
   const isPlaying = usePlayback((playback) => playback.isPlaying)
   const currentTrack = playbackPath ? state.tracks.find((track) => track.path === playbackPath) ?? queue.find((track) => track.path === playbackPath) : undefined
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -422,7 +434,7 @@ function App() {
   const title = view === 'home' ? 'Inicio' : view === 'tracks' ? 'Canciones' : view === 'albums' ? 'Álbumes' : view === 'artists' ? 'Artistas' : view === 'favorites' ? 'Tus favoritos' : view === 'queue' ? 'Cola de reproducción' : view === 'settings' ? 'Ajustes' : view === 'playlist' ? selectedPlaylistItem?.name || 'Playlist' : 'Tus playlists'
 
   return (
-    <div className="app-shell" style={themeVariables}>
+    <div className={`app-shell ${showNowPlaying ? 'with-panel' : ''}`} style={themeVariables}>
       {activeTheme.backgroundImage && <div className="theme-backdrop" style={{ backgroundImage: `linear-gradient(90deg, var(--app-bg) 0%, color-mix(in srgb, var(--app-bg) 86%, transparent) 58%, color-mix(in srgb, var(--app-bg) 66%, transparent) 100%), linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 72%, transparent), var(--app-bg)), url("${activeTheme.backgroundImage}")` }} />}
       <aside className="sidebar">
         <button className="brand" onClick={() => setView('home')} aria-label="Música Nativa, inicio">
@@ -430,41 +442,32 @@ function App() {
           <span className="brand-wordmark">música<span>nativa</span></span>
         </button>
 
-        <div className="sidebar-label">DESCUBRE TU BIBLIOTECA</div>
         <nav className="primary-nav" aria-label="Biblioteca">
           {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} aria-label={label} aria-current={view === id ? 'page' : undefined} title={label} onClick={() => { setView(id); if (id === 'queue') void refreshQueue() }}><Icon size={18} strokeWidth={1.8} /><span>{label}</span>{id === 'tracks' && state.tracks.length > 0 && <small>{state.tracks.length}</small>}</button>)}
         </nav>
 
         <div className="sidebar-rule" />
-        <div className="sidebar-section-heading"><span>PLAYLISTS</span><button className="icon-button tiny" onClick={() => setShowPlaylistForm(true)} aria-label="Crear playlist"><Plus size={16} /></button></div>
+        <div className="sidebar-section-heading"><span>Playlists</span><button className="icon-button tiny" onClick={() => setShowPlaylistForm(true)} aria-label="Crear playlist"><Plus size={16} /></button></div>
         <nav className="playlist-nav" aria-label="Playlists">
           {state.playlists.slice(0, 6).map((playlist) => <button key={playlist.id} className={`nav-item playlist-link ${view === 'playlist' && selectedPlaylist === playlist.id ? 'active' : ''}`} aria-label={`Playlist ${playlist.name}`} aria-current={view === 'playlist' && selectedPlaylist === playlist.id ? 'page' : undefined} title={playlist.name} onClick={() => void loadPlaylist(playlist.id)}><ListMusic size={17} /><span>{playlist.name}</span></button>)}
           {!state.playlists.length && <span className="sidebar-empty">Tus playlists aparecerán aquí.</span>}
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-library-card">
-            <span className="sidebar-library-orb"><AudioLines size={17} /></span>
-            <span><strong>Tu colección</strong><small>{state.tracks.length} canciones locales</small></span>
-            <button className="icon-button tiny" onClick={() => void chooseFolders()} aria-label="Añadir carpeta"><Plus size={16} /></button>
-          </div>
           <button className={`nav-item settings-link ${view === 'settings' ? 'active' : ''}`} aria-label={update.phase === 'available' ? 'Ajustes, hay una versión nueva' : 'Ajustes'} aria-current={view === 'settings' ? 'page' : undefined} title={update.phase === 'available' ? 'Ajustes · versión nueva disponible' : 'Ajustes'} onClick={() => setView('settings')}><Settings2 size={18} /><span>Ajustes</span>{update.phase === 'available' && <i className="update-dot" aria-hidden="true" />}</button>
-          <div className="sidebar-caption"><span className="status-dot" /> Música que ya es tuya.</div>
         </div>
       </aside>
 
       <main className="main-column">
         <header className="topbar">
-          <div className="history-controls"><button className="icon-button history-button" aria-label="Inicio" onClick={() => setView('home')}><ArrowLeft size={16} /></button><button className="icon-button history-button muted-button" aria-label="Siguiente vista"><ArrowRight size={16} /></button><span className="topbar-divider" /></div>
           <label className="search-box"><Search size={17} /><input ref={searchInput} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Busca canciones, artistas, álbumes…" aria-label="Buscar en tu biblioteca" /><kbd>Ctrl K</kbd></label>
           <button className="topbar-library-button" disabled={busy} onClick={() => void chooseFolders()}><FolderPlus size={16} /><span>Añadir música</span></button>
-          <button className="profile-pill" onClick={() => setView('settings')} aria-label="Abrir ajustes"><span className="profile-avatar">MN</span><ChevronDown size={14} /></button>
         </header>
 
         <div className="scroll-area">
           <AnimatePresence mode="wait" initial={!reducedMotion}>
             <motion.section key={`${view}-${selectedPlaylist}`} className="page-content" initial={reducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? undefined : { opacity: 0, y: -5 }} transition={{ duration: reducedMotion ? 0 : 0.2, ease: 'easeOut' }}>
-              {view === 'home' && <HomePage tracks={state.tracks} albums={albums} folders={state.folders} scanning={state.scanning} onPlay={(track) => void playTrack(track, state.tracks)} onBrowse={() => void chooseFolders()} onViewTracks={() => setView('tracks')} />}
+              {view === 'home' && <HomePage tracks={state.tracks} albums={albums} currentTrack={currentTrack} isPlaying={isPlaying} scanning={state.scanning} onPlay={(track) => void playTrack(track, state.tracks)} onPlayAlbum={(album) => void playTrack(album.tracks[0], album.tracks)} onToggle={() => void togglePlay()} onBrowse={() => void chooseFolders()} onViewTracks={() => setView('tracks')} onViewAlbums={() => setView('albums')} />}
               {view === 'tracks' && <TrackPage title={title} tracks={visibleTracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track) => void playTrack(track, visibleTracks)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => void startScan()} onChooseFolders={() => void chooseFolders()} scanning={state.scanning} />}
               {view === 'favorites' && <TrackPage title={title} tracks={visibleTracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track) => void playTrack(track, visibleTracks)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => void startScan()} onChooseFolders={() => void chooseFolders()} scanning={state.scanning} />}
               {view === 'albums' && <AlbumPage albums={albums.filter((album) => !normalizedQuery || `${album.name} ${album.artist}`.toLocaleLowerCase().includes(normalizedQuery))} onPlay={(album) => { void playTrack(album.tracks[0], album.tracks) }} />}
@@ -477,8 +480,10 @@ function App() {
           </AnimatePresence>
         </div>
 
-        <PlayerBar track={currentTrack} onToggle={() => void togglePlay()} onNext={() => void playNext()} onPrevious={() => void playPrevious()} onSeek={(value) => LibraryService.SeekTo(value).then(setPlayback)} onVolume={(value) => { void LibraryService.SetVolume(value).then(setPlayback) }} onFavorite={currentTrack ? () => void toggleFavorite(currentTrack) : undefined} onQueue={() => { setShowQueue((current) => !current); void refreshQueue() }} onSettings={() => setView('settings')} />
       </main>
+
+      {showNowPlaying && <NowPlayingPanel track={currentTrack} queue={playQueue} onPlay={(track) => void playTrack(track, playQueue)} onFavorite={currentTrack ? () => void toggleFavorite(currentTrack) : undefined} onClose={() => setShowNowPlaying(false)} />}
+      <PlayerBar track={currentTrack} onToggle={() => void togglePlay()} onNext={() => void playNext()} onPrevious={() => void playPrevious()} onSeek={(value) => LibraryService.SeekTo(value).then(setPlayback)} onVolume={(value) => { void LibraryService.SetVolume(value).then(setPlayback) }} onFavorite={currentTrack ? () => void toggleFavorite(currentTrack) : undefined} onQueue={() => { setShowQueue((current) => !current); void refreshQueue() }} onSettings={() => setView('settings')} panelOpen={showNowPlaying} onTogglePanel={() => setShowNowPlaying((open) => !open)} />
 
       <AnimatePresence>
         {showQueue && <motion.aside className="queue-drawer" initial={reducedMotion ? false : { x: 22, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 22, opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}><QueuePage tracks={queue} currentPath={playbackPath} onPlay={(track) => void playTrack(track, queue)} onClose={() => setShowQueue(false)} /></motion.aside>}
@@ -501,25 +506,56 @@ function PageHeading({ title, subtitle, action }: { title: string; subtitle?: st
   return <div className="page-heading"><div><h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>{action && <div className="heading-actions">{action}</div>}</div>
 }
 
-function HomePage({ tracks, albums, folders, scanning, onPlay, onBrowse, onViewTracks }: { tracks: Track[]; albums: { key: string; name: string; artist: string; tracks: Track[] }[]; folders: string[]; scanning: boolean; onPlay: (track: Track) => void; onBrowse: () => void; onViewTracks: () => void }) {
-  const ready = tracks.filter((track) => track.available)
-  const newest = [...ready].sort((a, b) => b.modifiedUnix - a.modifiedUnix).slice(0, 5)
-  const featured = newest[0]
+function HomePage({ tracks, albums, currentTrack, isPlaying, scanning, onPlay, onPlayAlbum, onToggle, onBrowse, onViewTracks, onViewAlbums }: { tracks: Track[]; albums: AlbumGroup[]; currentTrack?: Track; isPlaying: boolean; scanning: boolean; onPlay: (track: Track) => void; onPlayAlbum: (album: AlbumGroup) => void; onToggle: () => void; onBrowse: () => void; onViewTracks: () => void; onViewAlbums: () => void }) {
+  if (!tracks.length) {
+    return <><PageHeading title="Inicio" /><section className="empty-library"><div className="empty-icon"><FolderPlus size={22} /></div><div><h2>{scanning ? 'Buscando música en tus carpetas…' : 'Todavía no hay música por aquí.'}</h2><p>Elige una o más carpetas y Música Nativa leerá tus archivos MP3, WAV y FLAC sin moverlos.</p></div><button className="primary-button" onClick={onBrowse} disabled={scanning}><FolderPlus size={16} /> {scanning ? 'Buscando…' : 'Elegir carpetas'}</button></section></>
+  }
+  const newestTracks = tracks.filter((track) => track.available).sort((a, b) => b.modifiedUnix - a.modifiedUnix).slice(0, 6)
+  const newestAlbums = albums
+    .map((album) => ({ album, added: Math.max(...album.tracks.map((track) => track.modifiedUnix)) }))
+    .sort((a, b) => b.added - a.added)
+    .slice(0, 10)
+    .map(({ album }) => album)
+  const startAlbum = newestAlbums[0]
   return <>
-    <div className="home-hero">
-      <div className="hero-grain" />
-      <div className="hero-content"><h1>Que suene<br />a ti.</h1><p>Tu colección local, con el espacio y la calma que merece.</p><div className="hero-actions"><button className="primary-button" onClick={onViewTracks}><Library size={16} /> Explorar mi música <ArrowUpRight size={16} /></button><button className="quiet-button" onClick={onBrowse}><FolderPlus size={16} /> Añadir carpetas</button></div></div>
-      <div className="hero-art" aria-hidden="true"><div className="hero-halo" /><div className="hero-disc"><div className="disc-grooves" /><div className="disc-label"><span className="disc-label-center" /></div></div><div className="hero-sleeve" style={coverStyle(featured, 1)}><div className="sleeve-topline">MÚSICA NATIVA · VOL. 01</div><div className="sleeve-mark"><Music2 size={44} strokeWidth={1.05} /></div><div className="sleeve-bottomline"><span>Hecha para sonar</span><span>MN — 001</span></div></div><span className="hero-sticker">SONIDO<br />PROPIO</span><span className="hero-note">Tu música<br />vive aquí.</span></div>
-      <div className="hero-foot"><span><span className="status-dot" /> Hecha para escuchar, no para distraerte</span><span>{ready.length} canciones en tu biblioteca <ArrowUpRight className="hero-arrow" size={14} /></span></div>
-    </div>
+    <section className="continue-section">
+      <h2>{currentTrack ? (isPlaying ? 'Sonando ahora' : 'Seguir escuchando') : 'Para empezar'}</h2>
+      {currentTrack ? <div className="continue-card">
+        <span className="continue-art" style={coverStyle(currentTrack, 0)}>{currentTrack.coverUrl ? null : <Disc3 size={30} strokeWidth={1.3} />}</span>
+        <span className="continue-text"><strong>{currentTrack.title}</strong><small>{currentTrack.artist} · {currentTrack.album}</small></span>
+        <button className="continue-play" onClick={onToggle} aria-label={isPlaying ? 'Pausar' : 'Reanudar'}>{isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
+      </div> : startAlbum && <div className="continue-card">
+        <span className="continue-art" style={coverStyle(startAlbum.tracks[0], 0)}>{startAlbum.tracks[0]?.coverUrl ? null : <Disc3 size={30} strokeWidth={1.3} />}</span>
+        <span className="continue-text"><strong>{startAlbum.name}</strong><small>{startAlbum.artist} · {startAlbum.tracks.length} {startAlbum.tracks.length === 1 ? 'canción' : 'canciones'}</small></span>
+        <button className="continue-play" onClick={() => onPlayAlbum(startAlbum)} aria-label={`Reproducir ${startAlbum.name}`}><Play size={20} fill="currentColor" /></button>
+      </div>}
+    </section>
 
-    {!tracks.length ? <section className="empty-library"><div className="empty-icon"><FolderPlus size={22} /></div><div><h2>{scanning ? 'Estamos escuchando tus carpetas.' : 'Todavía no hay música por aquí.'}</h2><p>Elige una o más carpetas y Música Nativa buscará tus archivos MP3, WAV y FLAC sin moverlos.</p></div><button className="secondary-button" onClick={onBrowse} disabled={scanning}>{scanning ? 'Buscando…' : 'Elegir carpetas'} <ArrowUpRight size={16} /></button></section> : <>
-      <div className="section-heading"><h2>Añadidas recientemente</h2><button className="text-button" onClick={onViewTracks}>Ver canciones <ArrowUpRight size={15} /></button></div>
-      <div className="recent-list">{newest.map((track, index) => <button className="recent-track" key={track.id} onClick={() => onPlay(track)}><span className="recent-cover" style={coverStyle(track, index)}>{track.coverUrl ? null : <Music2 size={19} />}</span><span className="recent-info"><strong>{track.title}</strong><small>{track.artist} <i>·</i> {track.album}</small></span><span className="recent-format">{track.format}</span><span className="recent-duration">{formatDuration(track.durationSeconds)}</span><span className="recent-play"><Play size={14} fill="currentColor" /></span></button>)}</div>
-      {albums.length > 0 && <><div className="section-heading albums-heading"><h2>Álbumes de tu colección</h2><span className="section-count">{albums.length} {albums.length === 1 ? 'álbum' : 'álbumes'}</span></div><div className="album-strip">{albums.slice(0, 4).map((album, index) => <button className="album-mini" key={album.key} onClick={() => onPlay(album.tracks[0])}><span className="mini-art" style={coverStyle(album.tracks[0], index)}>{album.tracks[0]?.coverUrl ? null : <Disc3 size={27} />}</span><strong>{album.name}</strong><small>{album.artist}</small></button>)}</div></>}
-    </>}
-    <div className="home-library-note"><span className="note-icon"><Headphones size={17} /></span><span><strong>La música se queda en su sitio.</strong><small>Solo guardamos el catálogo. Tus archivos originales no se copian ni se cambian.</small></span><span className="note-folder-count">{folders.length} {folders.length === 1 ? 'carpeta' : 'carpetas'} conectadas</span></div>
+    <div className="section-heading"><h2>Añadido recientemente</h2><button className="text-button" onClick={onViewAlbums}>Ver álbumes <ArrowUpRight size={15} /></button></div>
+    <div className="album-shelf">{newestAlbums.map((album, index) => <button className="shelf-item" key={album.key} onClick={() => onPlayAlbum(album)} aria-label={`Reproducir ${album.name}, de ${album.artist}`}><span className="shelf-art" style={coverStyle(album.tracks[0], index)}>{album.tracks[0]?.coverUrl ? null : <Disc3 size={34} strokeWidth={1.2} />}<span className="shelf-play"><Play size={16} fill="currentColor" /></span></span><strong>{album.name}</strong><small>{album.artist}</small></button>)}</div>
+
+    <div className="section-heading"><h2>Canciones nuevas</h2><button className="text-button" onClick={onViewTracks}>Ver canciones <ArrowUpRight size={15} /></button></div>
+    <div className="recent-list">{newestTracks.map((track, index) => <button className="recent-track" key={track.id} onClick={() => onPlay(track)}><span className="recent-cover" style={coverStyle(track, index)}>{track.coverUrl ? null : <Music2 size={17} />}</span><span className="recent-info"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span><span className="recent-duration">{formatDuration(track.durationSeconds)}</span><span className="recent-play"><Play size={14} fill="currentColor" /></span></button>)}</div>
   </>
+}
+
+// NowPlayingPanel shows the current song large, with what plays next.
+function NowPlayingPanel({ track, queue, onPlay, onFavorite, onClose }: { track?: Track; queue: Track[]; onPlay: (track: Track) => void; onFavorite?: () => void; onClose: () => void }) {
+  const position = track ? queue.findIndex((item) => item.path === track.path) : -1
+  const upNext = position >= 0 ? queue.slice(position + 1, position + 6) : []
+  return <aside className="now-panel" aria-label="Reproduciendo">
+    {track?.coverUrl && <div className="now-panel-glow" style={{ backgroundImage: `url("${track.coverUrl}")` }} />}
+    <div className="now-panel-head"><span>Reproduciendo</span><button className="icon-button" onClick={onClose} aria-label="Ocultar el panel Reproduciendo"><X size={16} /></button></div>
+    {track ? <>
+      <div className="now-panel-art" style={coverStyle(track, 0)}>{track.coverUrl ? null : <Disc3 size={64} strokeWidth={1} />}</div>
+      <div className="now-panel-meta">
+        <div><strong>{track.title}</strong><small>{track.artist}</small><small>{track.album}</small></div>
+        {onFavorite && <button className={`player-heart ${track.favorite ? 'liked' : ''}`} onClick={onFavorite} aria-label={track.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}><Heart size={18} fill={track.favorite ? 'currentColor' : 'none'} /></button>}
+      </div>
+      <div className="now-panel-label">A continuación</div>
+      {upNext.length ? <div className="up-next">{upNext.map((item, index) => <button className="up-next-row" key={`${item.id}-${index}`} onClick={() => onPlay(item)}><span className="up-next-art" style={coverStyle(item, index)}>{item.coverUrl ? null : <Music2 size={13} />}</span><span><strong>{item.title}</strong><small>{item.artist}</small></span><span className="up-next-duration">{formatDuration(item.durationSeconds)}</span></button>)}</div> : <p className="now-panel-empty">No hay más canciones en la cola.</p>}
+    </> : <div className="now-panel-idle"><Disc3 size={44} strokeWidth={1.1} /><p>Elige una canción y aquí verás su portada y lo que sigue.</p></div>}
+  </aside>
 }
 
 function TrackPage({ title, tracks, currentPath, isPlaying, onPlay, onFavorite, onQueue, onPlaylist, onRefresh, onChooseFolders, scanning, showHeading = true }: { title: string; tracks: Track[]; currentPath: string; isPlaying: boolean; onPlay: (track: Track) => void; onFavorite: (track: Track) => void; onQueue: (track: Track) => void; onPlaylist: (track: Track) => void; onRefresh: () => void; onChooseFolders: () => void; scanning: boolean; showHeading?: boolean }) {
@@ -534,7 +570,7 @@ function TrackMenu({ onPlaylist, onQueue }: { onPlaylist: () => void; onQueue: (
   return <div className="track-menu"><button className="row-icon" onClick={() => setOpen((value) => !value)} aria-label="Más acciones"><Ellipsis size={17} /></button>{open && <><button className="menu-dismiss" onClick={() => setOpen(false)} aria-label="Cerrar menú" /><div className="track-menu-pop"><button onClick={() => { onQueue(); setOpen(false) }}><Plus size={14} /> Añadir a la cola</button><button onClick={() => { onPlaylist(); setOpen(false) }}><ListMusic size={14} /> Añadir a playlist</button></div></>}</div>
 }
 
-function AlbumPage({ albums, onPlay }: { albums: { key: string; name: string; artist: string; tracks: Track[] }[]; onPlay: (album: { key: string; name: string; artist: string; tracks: Track[] }) => void }) {
+function AlbumPage({ albums, onPlay }: { albums: AlbumGroup[]; onPlay: (album: AlbumGroup) => void }) {
   return <><PageHeading title="Álbumes" subtitle="Tu colección, ordenada por arte y artista." />{albums.length ? <div className="album-grid">{albums.map((album, index) => <button className="album-card" key={album.key} onClick={() => onPlay(album)}><span className="album-card-art" style={coverStyle(album.tracks[0], index)}>{album.tracks[0]?.coverUrl ? null : <Disc3 size={45} strokeWidth={1.15} />}</span><span className="album-card-meta"><strong>{album.name}</strong><small>{album.artist}</small><span>{album.tracks.length} {album.tracks.length === 1 ? 'canción' : 'canciones'}</span></span><span className="card-play"><Play size={15} fill="currentColor" /></span></button>)}</div> : <div className="empty-state"><div className="empty-icon"><Disc3 size={23} /></div><h2>Aún no hay álbumes.</h2><p>Los álbumes aparecen a partir de los metadatos de tu música.</p></div>}</>
 }
 
@@ -604,9 +640,9 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
   return <label className="color-field"><span>{label}</span><span className="color-picker-wrap"><input type="color" value={hex} onChange={(event) => onChange(event.target.value)} /><i style={{ background: hex }} /></span><code>{value}</code></label>
 }
 
-function PlayerBar({ track, onToggle, onNext, onPrevious, onSeek, onVolume, onFavorite, onQueue, onSettings }: { track?: Track; onToggle: () => void; onNext: () => void; onPrevious: () => void; onSeek: (value: number) => Promise<unknown>; onVolume: (value: number) => void; onFavorite?: () => void; onQueue: () => void; onSettings: () => void }) {
+function PlayerBar({ track, onToggle, onNext, onPrevious, onSeek, onVolume, onFavorite, onQueue, onSettings, panelOpen, onTogglePanel }: { track?: Track; onToggle: () => void; onNext: () => void; onPrevious: () => void; onSeek: (value: number) => Promise<unknown>; onVolume: (value: number) => void; onFavorite?: () => void; onQueue: () => void; onSettings: () => void; panelOpen: boolean; onTogglePanel: () => void }) {
   const playback = usePlayback((current) => current)
-  return <footer className="player-bar"><div className="now-playing"><span className="player-cover" style={coverStyle(track, 0)}>{track?.coverUrl ? null : <Disc3 size={22} strokeWidth={1.2} />}</span><span className="now-playing-text"><strong>{track?.title || 'Elige lo que quieres escuchar'}</strong><small>{track?.artist || 'Tu biblioteca local'}</small></span>{onFavorite && <button className={`player-heart ${track?.favorite ? 'liked' : ''}`} onClick={onFavorite} aria-label="Marcar como favorito"><Heart size={16} fill={track?.favorite ? 'currentColor' : 'none'} /></button>}</div><div className="player-center"><div className="transport-controls"><button className="transport-subtle" onClick={onPrevious} aria-label="Canción anterior"><SkipBack size={18} fill="currentColor" /></button><button className="play-button" onClick={onToggle} aria-label={playback.isPlaying ? 'Pausar' : 'Reproducir'}>{playback.isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button className="transport-subtle" onClick={onNext} aria-label="Siguiente canción"><SkipForward size={18} fill="currentColor" /></button></div><SeekBar positionMs={playback.positionMs} durationMs={playback.durationMs} disabled={!playback.path} onSeek={onSeek} /></div><div className="player-tools"><button className="tool-button" onClick={onQueue} aria-label="Ver cola"><ListMusic size={17} /></button><button className="tool-button" onClick={onSettings} aria-label="Ajustes de audio"><SlidersHorizontal size={17} /></button><Volume2 size={17} className="volume-icon" /><input aria-label="Volumen" className="volume-range" type="range" min={0} max={100} value={playback.volume} onChange={(event) => onVolume(Number(event.target.value))} style={{ accentColor: 'var(--accent)' }} /><span className={`player-output-dot ${playback.outputReady ? 'ready' : ''}`} title={playback.outputReady ? `Audio ${playback.outputMode}` : 'Sin salida de audio'} /></div></footer>
+  return <footer className="player-bar"><div className="now-playing"><span className="player-cover" style={coverStyle(track, 0)}>{track?.coverUrl ? null : <Disc3 size={22} strokeWidth={1.2} />}</span><span className="now-playing-text"><strong>{track?.title || 'Elige lo que quieres escuchar'}</strong><small>{track?.artist || 'Tu biblioteca local'}</small></span>{onFavorite && <button className={`player-heart ${track?.favorite ? 'liked' : ''}`} onClick={onFavorite} aria-label="Marcar como favorito"><Heart size={16} fill={track?.favorite ? 'currentColor' : 'none'} /></button>}</div><div className="player-center"><div className="transport-controls"><button className="transport-subtle" onClick={onPrevious} aria-label="Canción anterior"><SkipBack size={19} fill="currentColor" /></button><button className="play-button" onClick={onToggle} aria-label={playback.isPlaying ? 'Pausar' : 'Reproducir'}>{playback.isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="play-icon" />}</button><button className="transport-subtle" onClick={onNext} aria-label="Siguiente canción"><SkipForward size={19} fill="currentColor" /></button></div><SeekBar positionMs={playback.positionMs} durationMs={playback.durationMs} disabled={!playback.path} onSeek={onSeek} /></div><div className="player-tools"><button className={`tool-button panel-toggle ${panelOpen ? 'active' : ''}`} onClick={onTogglePanel} aria-pressed={panelOpen} aria-label="Panel Reproduciendo" title="Panel Reproduciendo"><PanelRight size={17} /></button><button className="tool-button" onClick={onQueue} aria-label="Ver cola" title="Cola"><ListMusic size={17} /></button><button className="tool-button" onClick={onSettings} aria-label="Ajustes de audio"><SlidersHorizontal size={17} /></button><Volume2 size={17} className="volume-icon" /><input aria-label="Volumen" className="volume-range" type="range" min={0} max={100} value={playback.volume} onChange={(event) => onVolume(Number(event.target.value))} style={{ accentColor: 'var(--accent)' }} /><span className={`player-output-dot ${playback.outputReady ? 'ready' : ''}`} title={playback.outputReady ? `Audio ${playback.outputMode}` : 'Sin salida de audio'} /></div></footer>
 }
 
 // SeekBar follows the pointer while the listener drags and seeks once, when the

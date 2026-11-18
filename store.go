@@ -188,15 +188,19 @@ func (s *Store) moveInlineImages(ctx context.Context) error {
 
 func builtInThemes() []Theme {
 	return []Theme{
-		{ID: "nocturno", Name: "Nocturno", Background: "#11110f", Accent: "#e7a878", Surface: "#1b1b18", Text: "#f4f0e8", Muted: "#969188", BuiltIn: true},
-		{ID: "aurora", Name: "Aurora", Background: "#101611", Accent: "#9fc8a8", Surface: "#1a211b", Text: "#eef3ec", Muted: "#919d91", BuiltIn: true},
-		{ID: "cobalto", Name: "Cobalto", Background: "#101319", Accent: "#90aadb", Surface: "#1a1e27", Text: "#f0f1f4", Muted: "#9399a5", BuiltIn: true},
+		{ID: "nocturno", Name: "Nocturno", Background: "#121214", Accent: "#ff7a59", Surface: "#1d1d21", Text: "#f4f4f6", Muted: "#a1a1aa", BuiltIn: true},
+		{ID: "aurora", Name: "Aurora", Background: "#111413", Accent: "#7fd1a0", Surface: "#1b201d", Text: "#eef3ef", Muted: "#9aa79f", BuiltIn: true},
+		{ID: "cobalto", Name: "Cobalto", Background: "#101218", Accent: "#7aa2ff", Surface: "#1a1d25", Text: "#f0f2f7", Muted: "#9aa1b2", BuiltIn: true},
 	}
 }
 
+// saveBuiltInTheme writes an included theme, refreshing the colors stored by
+// earlier versions of the app.
 func (s *Store) saveBuiltInTheme(ctx context.Context, theme Theme) error {
-	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO themes(id,name,background,accent,surface,text_color,muted,background_image,built_in)
-		VALUES(?,?,?,?,?,?,?,'',1)`, theme.ID, theme.Name, theme.Background, theme.Accent, theme.Surface, theme.Text, theme.Muted)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO themes(id,name,background,accent,surface,text_color,muted,background_image,built_in)
+		VALUES(?,?,?,?,?,?,?,'',1) ON CONFLICT(id) DO UPDATE SET name=excluded.name,background=excluded.background,
+		accent=excluded.accent,surface=excluded.surface,text_color=excluded.text_color,muted=excluded.muted
+		WHERE themes.built_in=1`, theme.ID, theme.Name, theme.Background, theme.Accent, theme.Surface, theme.Text, theme.Muted)
 	return err
 }
 
