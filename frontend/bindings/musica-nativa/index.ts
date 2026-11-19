@@ -10,14 +10,17 @@ export {
     AppState,
     AudioDevice,
     AudioDevicesChanged,
+    ListeningHistory,
     LyricLine,
     LyricWord,
     Lyrics,
     PlayMode,
     PlaybackState,
     Playlist,
+    ResumePoint,
     ScanProgress,
     Theme,
     ThemeSaveResult,
+    TrackPlays,
     UpdateCheckResult
 } from "./models.js";

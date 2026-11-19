@@ -13,6 +13,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "audio:devices": main$0.AudioDevicesChanged;
+            "history:changed": main$0.ListeningHistory;
             "library:scan-progress": main$0.ScanProgress;
             "player:state": main$0.PlaybackState;
         }

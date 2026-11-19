@@ -14,6 +14,11 @@ import "../github.com/wailsapp/wails/v3/internal/eventcreate.js";
 export const AudioDevices = "audio:devices";
 
 /**
+ * Name of the custom event "history:changed".
+ */
+export const HistoryChanged = "history:changed";
+
+/**
  * Name of the custom event "library:scan-progress".
  */
 export const LibraryScanProgress = "library:scan-progress";

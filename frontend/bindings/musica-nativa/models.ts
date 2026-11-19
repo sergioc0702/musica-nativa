@@ -141,6 +141,66 @@ export class AudioDevicesChanged {
 }
 
 /**
+ * ListeningHistory is what the home page builds on.
+ */
+export class ListeningHistory {
+    /**
+     * Recent holds track IDs, the most recently listened first.
+     */
+    "recent": string[];
+
+    /**
+     * Top holds the most listened songs, most plays first.
+     */
+    "top": TrackPlays[];
+
+    /**
+     * LastPlayed is when each listened song was last heard (Unix seconds).
+     */
+    "lastPlayed": { [_ in string]?: number };
+    "resume"?: ResumePoint | null;
+
+    /** Creates a new ListeningHistory instance. */
+    constructor($$source: Partial<ListeningHistory> = {}) {
+        if (!("recent" in $$source)) {
+            this["recent"] = [];
+        }
+        if (!("top" in $$source)) {
+            this["top"] = [];
+        }
+        if (!("lastPlayed" in $$source)) {
+            this["lastPlayed"] = {};
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ListeningHistory instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ListeningHistory {
+        const $$createField0_0 = $$createType2;
+        const $$createField1_0 = $$createType11;
+        const $$createField2_0 = $$createType12;
+        const $$createField3_0 = $$createType14;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("recent" in $$parsedSource) {
+            $$parsedSource["recent"] = $$createField0_0($$parsedSource["recent"]);
+        }
+        if ("top" in $$parsedSource) {
+            $$parsedSource["top"] = $$createField1_0($$parsedSource["top"]);
+        }
+        if ("lastPlayed" in $$parsedSource) {
+            $$parsedSource["lastPlayed"] = $$createField2_0($$parsedSource["lastPlayed"]);
+        }
+        if ("resume" in $$parsedSource) {
+            $$parsedSource["resume"] = $$createField3_0($$parsedSource["resume"]);
+        }
+        return new ListeningHistory($$parsedSource as Partial<ListeningHistory>);
+    }
+}
+
+/**
  * LyricLine is one line of lyrics. In synced lyrics TimeMs is when it is sung;
  * an empty Text marks an instrumental pause.
  */
@@ -165,7 +225,7 @@ export class LyricLine {
      * Creates a new LyricLine instance from a string or object.
      */
     static createFrom($$source: any = {}): LyricLine {
-        const $$createField2_0 = $$createType11;
+        const $$createField2_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("words" in $$parsedSource) {
             $$parsedSource["words"] = $$createField2_0($$parsedSource["words"]);
@@ -257,7 +317,7 @@ export class Lyrics {
      * Creates a new Lyrics instance from a string or object.
      */
     static createFrom($$source: any = {}): Lyrics {
-        const $$createField4_0 = $$createType13;
+        const $$createField4_0 = $$createType18;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("lines" in $$parsedSource) {
             $$parsedSource["lines"] = $$createField4_0($$parsedSource["lines"]);
@@ -348,7 +408,7 @@ export class PlaybackState {
      * Creates a new PlaybackState instance from a string or object.
      */
     static createFrom($$source: any = {}): PlaybackState {
-        const $$createField9_0 = $$createType14;
+        const $$createField9_0 = $$createType19;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("equalizer" in $$parsedSource) {
             $$parsedSource["equalizer"] = $$createField9_0($$parsedSource["equalizer"]);
@@ -362,6 +422,12 @@ export class Playlist {
     "name": string;
     "trackCount": number;
     "createdAt": number;
+
+    /**
+     * Covers are the pictures of its first songs (up to four different ones),
+     * for the playlist's mosaic.
+     */
+    "covers": string[];
 
     /** Creates a new Playlist instance. */
     constructor($$source: Partial<Playlist> = {}) {
@@ -377,6 +443,9 @@ export class Playlist {
         if (!("createdAt" in $$source)) {
             this["createdAt"] = 0;
         }
+        if (!("covers" in $$source)) {
+            this["covers"] = [];
+        }
 
         Object.assign(this, $$source);
     }
@@ -385,8 +454,40 @@ export class Playlist {
      * Creates a new Playlist instance from a string or object.
      */
     static createFrom($$source: any = {}): Playlist {
+        const $$createField4_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("covers" in $$parsedSource) {
+            $$parsedSource["covers"] = $$createField4_0($$parsedSource["covers"]);
+        }
         return new Playlist($$parsedSource as Partial<Playlist>);
+    }
+}
+
+/**
+ * ResumePoint is the song that was playing last and where it was.
+ */
+export class ResumePoint {
+    "trackId": string;
+    "positionMs": number;
+
+    /** Creates a new ResumePoint instance. */
+    constructor($$source: Partial<ResumePoint> = {}) {
+        if (!("trackId" in $$source)) {
+            this["trackId"] = "";
+        }
+        if (!("positionMs" in $$source)) {
+            this["positionMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResumePoint instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ResumePoint {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ResumePoint($$parsedSource as Partial<ResumePoint>);
     }
 }
 
@@ -519,6 +620,34 @@ export class ThemeSaveResult {
     }
 }
 
+/**
+ * TrackPlays is how many times a song was listened to.
+ */
+export class TrackPlays {
+    "trackId": string;
+    "plays": number;
+
+    /** Creates a new TrackPlays instance. */
+    constructor($$source: Partial<TrackPlays> = {}) {
+        if (!("trackId" in $$source)) {
+            this["trackId"] = "";
+        }
+        if (!("plays" in $$source)) {
+            this["plays"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TrackPlays instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TrackPlays {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TrackPlays($$parsedSource as Partial<TrackPlays>);
+    }
+}
+
 export class UpdateCheckResult {
     "currentVersion": string;
     "available": boolean;
@@ -561,8 +690,13 @@ const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = AudioDevice.createFrom;
 const $$createType8 = $Create.Array($$createType7);
 const $$createType9 = PlaybackState.createFrom;
-const $$createType10 = LyricWord.createFrom;
+const $$createType10 = TrackPlays.createFrom;
 const $$createType11 = $Create.Array($$createType10);
-const $$createType12 = LyricLine.createFrom;
-const $$createType13 = $Create.Array($$createType12);
-const $$createType14 = $Create.Array($Create.Any);
+const $$createType12 = $Create.Map($Create.Any, $Create.Any);
+const $$createType13 = ResumePoint.createFrom;
+const $$createType14 = $Create.Nullable($$createType13);
+const $$createType15 = LyricWord.createFrom;
+const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = LyricLine.createFrom;
+const $$createType18 = $Create.Array($$createType17);
+const $$createType19 = $Create.Array($Create.Any);

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { RotateCcw, X } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { RotateCcw } from 'lucide-react'
 import { LibraryService } from '../bindings/musica-nativa'
 import { getPlayback, setPlayback } from './playback'
 import { curvePath, eqBands, eqMaxGain, eqPresets, presetFor, snapGain } from './equalizer'
@@ -13,20 +13,18 @@ type Settings = { enabled: boolean; bands: number[] }
 const formatGain = (gain: number) => `${gain > 0 ? '+' : ''}${gain}`
 const bandName = (frequency: number) => (frequency >= 1000 ? `${frequency / 1000} kHz` : `${Math.round(frequency)} Hz`)
 
-// EqualizerPanel floats above the player bar. Each change is sent while the
-// slider moves and the audio engine applies it within milliseconds; while one
-// is on its way, only the newest waits behind it. Playing, pausing or seeking
-// in the player bar keeps the panel open.
-export function EqualizerPanel({ onClose, onError }: { onClose: () => void; onError: (error: unknown) => void }) {
+// EqualizerPanel is the content of the equalizer's floating panel. Each
+// change is sent while the slider moves and the audio engine applies it
+// within milliseconds; while one is on its way, only the newest waits behind it.
+export function EqualizerPanel({ onError }: { onError: (error: unknown) => void }) {
   const [settings, setSettings] = useState<Settings>(() => {
     const playback = getPlayback()
     return { enabled: playback.equalizerOn, bands: eqBands.map((_, index) => snapGain(playback.equalizer[index] ?? 0)) }
   })
-  const panel = useRef<HTMLDivElement>(null)
   const sending = useRef(false)
   const waiting = useRef<Settings | null>(null)
-  const callbacks = useRef({ onClose, onError })
-  callbacks.current = { onClose, onError }
+  const callbacks = useRef({ onError })
+  callbacks.current = { onError }
 
   const send = (next: Settings) => {
     if (sending.current) {
@@ -51,30 +49,15 @@ export function EqualizerPanel({ onClose, onError }: { onClose: () => void; onEr
   const setBand = (index: number, value: number) =>
     apply({ ...settings, bands: settings.bands.map((gain, i) => (i === index ? snapGain(value) : gain)) })
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') callbacks.current.onClose() }
-    const onPointer = (event: PointerEvent) => {
-      const target = event.target instanceof Element ? event.target : null
-      if (target && !panel.current?.contains(target) && !target.closest('.player-bar')) callbacks.current.onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('pointerdown', onPointer)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', onPointer)
-    }
-  }, [])
-
   const preset = presetFor(settings.bands)
   const path = curvePath(settings.bands, curveWidth, curveHeight, curveRange)
   const middle = curveHeight / 2
   const gridY = (decibels: number) => middle - (decibels / curveRange) * middle
 
-  return <div ref={panel} className={`eq-panel ${settings.enabled ? '' : 'off'}`} role="dialog" aria-label="Ecualizador">
+  return <div className={`eq-panel ${settings.enabled ? '' : 'off'}`}>
     <div className="eq-panel-head">
-      <div><strong>Ecualizador</strong><small>{settings.enabled ? preset?.name ?? 'Personalizado' : 'Apagado: suena el original'}</small></div>
+      <div><strong>{settings.enabled ? preset?.name ?? 'Personalizado' : 'Apagado'}</strong><small>{settings.enabled ? 'Los cambios se oyen al instante' : 'Suena el original, sin cambios'}</small></div>
       <button role="switch" aria-checked={settings.enabled} aria-label="Ecualizador activado" className={`toggle-switch ${settings.enabled ? 'on' : ''}`} onClick={() => apply({ ...settings, enabled: !settings.enabled })}><span /></button>
-      <button className="icon-button" onClick={onClose} aria-label="Cerrar el ecualizador"><X size={16} /></button>
     </div>
     <div className="eq-presets">
       <label><span>Preajuste</span>

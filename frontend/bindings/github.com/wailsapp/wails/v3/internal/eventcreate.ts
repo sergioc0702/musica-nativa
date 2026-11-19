@@ -13,14 +13,16 @@ import * as main$0 from "../../../../../musica-nativa/models.js";
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
         "audio:devices": $$createType0,
-        "library:scan-progress": $$createType1,
-        "player:state": $$createType2,
+        "history:changed": $$createType1,
+        "library:scan-progress": $$createType2,
+        "player:state": $$createType3,
     }));
 }
 
 // Private type creation functions
 const $$createType0 = main$0.AudioDevicesChanged.createFrom;
-const $$createType1 = main$0.ScanProgress.createFrom;
-const $$createType2 = main$0.PlaybackState.createFrom;
+const $$createType1 = main$0.ListeningHistory.createFrom;
+const $$createType2 = main$0.ScanProgress.createFrom;
+const $$createType3 = main$0.PlaybackState.createFrom;
 
 configure();

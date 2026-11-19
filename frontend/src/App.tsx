@@ -2,19 +2,58 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Events } from '@wailsio/runtime'
 import {
-  AudioLines, Check, Clock3, Disc3, Ellipsis, Heart, Home, Keyboard, MicVocal, PanelRight, Repeat, Repeat1,
-  Library, ListMusic, Mic2, Music2, Pause, Play, Plus, Search, Settings2,
-  Shuffle, SkipBack, SkipForward, SlidersHorizontal, Volume2, X,
-  FolderPlus, RefreshCw, Sparkles, ArrowUpRight, Trash2,
+  AudioLines, Check, ChevronDown, ChevronUp, Clock3, Info, PanelLeftClose, PanelLeftOpen, Palette, Disc3, Ellipsis, Heart, Keyboard, MicVocal, PanelRight, Repeat, Repeat1,
+  House, Library, ListMusic, ListOrdered, Music2, Pause, Play, Plus, Search, Settings, UserRound,
+  Shuffle, SkipBack, SkipForward, SlidersVertical, TriangleAlert, Volume1, Volume2, VolumeX, X,
+  FolderPlus, RefreshCw, ArrowUpRight, Trash2,
 } from 'lucide-react'
 import { LibraryService } from '../bindings/musica-nativa'
-import type { AppState, PlaybackState, PlayMode, ScanProgress, Theme } from '../bindings/musica-nativa/models'
+import type { AppState, ListeningHistory, PlaybackState, PlayMode, ScanProgress, Theme } from '../bindings/musica-nativa/models'
 import type { Track } from '../bindings/musica-nativa/internal/library/models'
 import '../bindings/events'
 import { getPlayback, setPlayback, usePlayback } from './playback'
-import { groupAlbums, type AlbumGroup } from './albums'
+import { albumKey, groupAlbums, nameKey, type AlbumGroup } from './albums'
+import { coverStyle, formatDuration, formatTime } from './format'
+import { HomePage } from './Home'
+import { AlbumView, AlbumsPage } from './AlbumPages'
+import { ArtistView, ArtistsPage } from './ArtistPages'
+import { FavoritesView } from './FavoritesPage'
+import { FloatingPanel } from './FloatingPanel'
+import { useCoverColor } from './coverColor'
+import { raisePanel, togglePanel, type PanelID, type Rect, type Size } from './floating'
+import { artistAlbums, topArtists, type ArtistSummary } from './homeSections'
+import { formatLength, sortNames, sortTracks, type SortKey } from './trackSort'
 import { EqualizerPanel } from './EqualizerPanel'
 import { LyricsView } from './LyricsView'
+
+const panelTitles: Record<PanelID, string> = { equalizer: 'Ecualizador', queue: 'Cola', lyrics: 'Letra' }
+const panelIcons: Record<PanelID, ReactNode> = {
+  equalizer: <SlidersVertical size={15} />,
+  queue: <ListOrdered size={15} />,
+  lyrics: <MicVocal size={15} />,
+}
+const panelMin: Record<PanelID, Size> = {
+  equalizer: { width: 520, height: 360 },
+  queue: { width: 300, height: 240 },
+  lyrics: { width: 320, height: 280 },
+}
+// Where each panel opens the first time: the equalizer above the player bar,
+// the queue on the right and the lyrics on the left.
+const panelStart: Record<PanelID, (window: Size) => Rect> = {
+  equalizer: (window) => ({ x: window.width - 690, y: window.height - 580, width: 660, height: 470 }),
+  queue: (window) => ({ x: window.width - 440, y: 84, width: 400, height: Math.min(560, window.height - 220) }),
+  lyrics: (window) => ({ x: 260, y: 84, width: 520, height: Math.min(620, window.height - 220) }),
+}
+
+type SettingsTab = 'library' | 'sound' | 'look' | 'lyrics' | 'keys' | 'about'
+const settingsTabs: { id: SettingsTab; label: string; icon: typeof Library }[] = [
+  { id: 'library', label: 'Biblioteca', icon: Library },
+  { id: 'sound', label: 'Sonido', icon: AudioLines },
+  { id: 'look', label: 'Apariencia', icon: Palette },
+  { id: 'lyrics', label: 'Letras', icon: MicVocal },
+  { id: 'keys', label: 'Atajos', icon: Keyboard },
+  { id: 'about', label: 'Acerca de', icon: Info },
+]
 
 const shortcutList: [string[], string][] = [
   [['Espacio'], 'Reproducir o pausar'],
@@ -28,10 +67,11 @@ const shortcutList: [string[], string][] = [
   [['R'], 'Repetir: no, toda la cola o esta canción'],
   [['E'], 'Abrir o cerrar el ecualizador'],
   [['L'], 'Mostrar u ocultar la letra'],
+  [['C'], 'Mostrar u ocultar la cola'],
   [['Ctrl', 'K'], 'Buscar'],
 ]
 
-type View = 'home' | 'tracks' | 'albums' | 'artists' | 'favorites' | 'playlists' | 'queue' | 'settings' | 'playlist' | 'lyrics'
+type View = 'home' | 'tracks' | 'albums' | 'artists' | 'favorites' | 'playlists' | 'settings' | 'playlist' | 'album' | 'artist'
 type UpdatePhase = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'verifying' | 'installing' | 'ready' | 'restarting' | 'error'
 type UpdateInfo = { phase: UpdatePhase; currentVersion: string; version?: string; name?: string; notes?: string; written: number; total: number; message?: string }
 
@@ -48,38 +88,36 @@ const defaultTheme: Theme = {
   surface: '#1d1d21', text: '#f4f4f6', muted: '#a1a1aa', builtIn: true,
 }
 
-const navItems: { id: View; label: string; icon: typeof Home }[] = [
-  { id: 'home', label: 'Inicio', icon: Home },
+// BrandLogo is Música Nativa's mark: three sound bars on the accent color.
+function BrandLogo() {
+  return <svg className="brand-logo" viewBox="0 0 32 32" aria-hidden="true">
+    <defs>
+      <linearGradient id="brand-logo-fill" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" style={{ stopColor: 'var(--accent)' }} />
+        <stop offset="1" style={{ stopColor: 'var(--accent)', stopOpacity: 0.62 }} />
+      </linearGradient>
+    </defs>
+    <rect width="32" height="32" rx="9" fill="url(#brand-logo-fill)" />
+    <circle cx="16" cy="16" r="10.5" fill="none" stroke="var(--on-accent)" strokeOpacity=".22" strokeWidth="1.4" />
+    <rect x="9.6" y="13" width="3.2" height="8" rx="1.6" fill="var(--on-accent)" />
+    <rect x="14.4" y="8.5" width="3.2" height="15" rx="1.6" fill="var(--on-accent)" />
+    <rect x="19.2" y="11" width="3.2" height="11" rx="1.6" fill="var(--on-accent)" />
+  </svg>
+}
+
+// playlistShade picks one of the cover gradients for a playlist, always the same for a name.
+const playlistShade = (name: string) => [...name].reduce((total, letter) => total + letter.charCodeAt(0), 0)
+
+const navItems: { id: View; label: string; icon: typeof House }[] = [
+  { id: 'home', label: 'Inicio', icon: House },
   { id: 'tracks', label: 'Canciones', icon: Music2 },
   { id: 'albums', label: 'Álbumes', icon: Disc3 },
-  { id: 'artists', label: 'Artistas', icon: Mic2 },
+  { id: 'artists', label: 'Artistas', icon: UserRound },
   { id: 'favorites', label: 'Favoritos', icon: Heart },
-  { id: 'queue', label: 'Cola', icon: ListMusic },
 ]
-
-function formatTime(milliseconds: number) {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
-
-function formatDuration(seconds: number) {
-  return seconds > 0 ? formatTime(seconds * 1000) : '—:—'
-}
 
 function displayError(error: unknown) {
   return error instanceof Error ? error.message : String(error || 'Ocurrió un problema.')
-}
-
-function coverStyle(track?: Track, index = 0): CSSProperties {
-  if (track?.coverUrl) return { backgroundImage: `url("${track.coverUrl}")` }
-  const colors = [
-    'linear-gradient(145deg, #b77f5c, #473831 54%, #161817)',
-    'linear-gradient(145deg, #8f9c80, #40483e 54%, #161817)',
-    'linear-gradient(145deg, #7f8fa2, #39414a 54%, #17191b)',
-    'linear-gradient(145deg, #a48d77, #51443a 54%, #171716)',
-    'linear-gradient(145deg, #8c7384, #443944 54%, #191719)',
-  ]
-  return { backgroundImage: colors[index % colors.length] }
 }
 
 function App() {
@@ -98,10 +136,21 @@ function App() {
   // the quiet check when the app opens.
   const updateRequested = useRef(false)
   const launchCheckDone = useRef(false)
-  const [showQueue, setShowQueue] = useState(false)
-  const [showEqualizer, setShowEqualizer] = useState(false)
-  // The page to go back to when the lyrics close.
-  const [lyricsReturn, setLyricsReturn] = useState<View>('home')
+  // The floating panels that are open, from the one at the back to the one in front.
+  const [panels, setPanels] = useState<PanelID[]>([])
+  const showQueue = panels.includes('queue')
+  const showEqualizer = panels.includes('equalizer')
+  const showLyrics = panels.includes('lyrics')
+  const toggle = (id: PanelID) => setPanels((open) => togglePanel(open, id))
+  const bringUp = (id: PanelID) => setPanels((open) => (open.includes(id) ? raisePanel(open, id) : [...open, id]))
+  const [openAlbumKey, setOpenAlbumKey] = useState('')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('mn-sidebar') === 'collapsed' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('mn-sidebar', sidebarCollapsed ? 'collapsed' : 'open') } catch { /* private window */ }
+  }, [sidebarCollapsed])
+  const [openArtistName, setOpenArtistName] = useState('')
   // Below 1100 px the side panel does not fit (style.css hides it).
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1100px)').matches)
   const [showNowPlaying, setShowNowPlaying] = useState(() => {
@@ -109,6 +158,7 @@ function App() {
   })
   const [playQueue, setPlayQueue] = useState<Track[]>([])
   const [playMode, setPlayMode] = useState<PlayMode>({ shuffle: false, repeat: 'off' })
+  const [history, setHistory] = useState<ListeningHistory>({ recent: [], top: [], lastPlayed: {} })
   const [showPlaylistForm, setShowPlaylistForm] = useState(false)
   const [playlistTarget, setPlaylistTarget] = useState<Track | null>(null)
   const [playlistName, setPlaylistName] = useState('')
@@ -234,6 +284,11 @@ function App() {
   useEffect(() => {
     LibraryService.PlayMode().then(setPlayMode).catch(() => { /* keep the defaults */ })
   }, [])
+  // The backend sends the history again each time a song counts as listened.
+  useEffect(() => {
+    LibraryService.ListeningHistory().then(setHistory).catch(() => { /* the home page works without it */ })
+    return Events.On('history:changed', (event) => setHistory(event.data as ListeningHistory))
+  }, [])
   const isPlaying = usePlayback((playback) => playback.isPlaying)
   const currentTrack = playbackPath ? state.tracks.find((track) => track.path === playbackPath) ?? queue.find((track) => track.path === playbackPath) : undefined
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -243,16 +298,6 @@ function App() {
   }), [normalizedQuery, state.tracks])
   const favoriteTracks = useMemo(() => searchedTracks.filter((track) => track.favorite), [searchedTracks])
   const albums = useMemo(() => groupAlbums(state.tracks), [state.tracks])
-  const tracksByArtist = useMemo(() => {
-    const grouped = new Map<string, Track[]>()
-    for (const track of state.tracks) {
-      const artistTracks = grouped.get(track.artist)
-      if (artistTracks) artistTracks.push(track)
-      else grouped.set(track.artist, [track])
-    }
-    return grouped
-  }, [state.tracks])
-  const artists = useMemo(() => [...tracksByArtist.keys()].sort((a, b) => a.localeCompare(b)), [tracksByArtist])
   useEffect(() => {
     if (!toast) return
     const timeout = window.setTimeout(() => setToast(''), 4200)
@@ -331,32 +376,60 @@ function App() {
   // One button shows what plays next: the side panel when the window is wide
   // enough, the floating queue when it is not.
   const togglePlayingView = () => {
-    setShowEqualizer(false)
     if (!narrow) {
       setShowNowPlaying((open) => !open)
       return
     }
-    setShowQueue((open) => !open)
-    void refreshQueue()
+    toggle('queue')
+    loadPlayQueue()
   }
 
-  // The lyrics take the main area; closing them goes back to the page before.
-  const toggleLyrics = () => {
-    if (view === 'lyrics') {
-      setView(lyricsReturn)
-      return
-    }
-    setLyricsReturn(view)
-    setView('lyrics')
-  }
+  const toggleLyrics = () => toggle('lyrics')
   const seekLyrics = useCallback((positionMs: number) => {
     void LibraryService.SeekTo(positionMs).then(setPlayback)
   }, [])
 
-  // The equalizer and the queue float in the same corner: one at a time.
-  const toggleEqualizer = () => {
-    setShowQueue(false)
-    setShowEqualizer((open) => !open)
+  const toggleEqualizer = () => toggle('equalizer')
+
+
+  const openedAlbum = view === 'album' ? albums.find((album) => album.key === openAlbumKey) : undefined
+  const openAlbum = (album: AlbumGroup) => {
+    setOpenAlbumKey(album.key)
+    setView('album')
+  }
+  const playAlbum = (album: AlbumGroup) => {
+    const first = album.tracks.find((track) => track.available)
+    if (first) void playTrack(first, album.tracks)
+  }
+  // Every artist with their songs (album by album) and how much they were heard.
+  const artistSummaries = useMemo(() => topArtists(state.tracks, history.top ?? [], Infinity), [state.tracks, history.top])
+  const favoriteCount = state.tracks.filter((track) => track.favorite).length
+  const navCounts: Partial<Record<View, number>> = { tracks: state.tracks.length, albums: albums.length, artists: artistSummaries.length, favorites: favoriteCount }
+  const openedArtist = view === 'artist' ? artistSummaries.find((artist) => artist.key === openArtistName) : undefined
+  const openArtist = (name: string) => {
+    setOpenArtistName(name)
+    setView('artist')
+  }
+  const playArtist = (artist: ArtistSummary) => {
+    const first = artist.tracks.find((track) => track.available)
+    if (first) void playTrack(first, artist.tracks)
+  }
+
+  const resumeListening = async () => {
+    try {
+      await LibraryService.ResumeListening()
+      await refreshQueue()
+    } catch (error) { notify(displayError(error)) }
+  }
+
+  // shufflePlay turns shuffle on and plays list from a random song.
+  const shufflePlay = async (list: Track[]) => {
+    const playable = list.filter((track) => track.available)
+    if (!playable.length) return
+    try {
+      if (!playMode.shuffle) setPlayMode(await LibraryService.SetShuffle(true))
+      await playTrack(playable[Math.floor(Math.random() * playable.length)], playable)
+    } catch (error) { notify(displayError(error)) }
   }
 
   const toggleShuffle = async () => {
@@ -415,6 +488,9 @@ function App() {
       toggleEqualizer()
     } else if (!command && !event.repeat && key === 'l') {
       toggleLyrics()
+    } else if (!command && !event.repeat && key === 'c') {
+      toggle('queue')
+      loadPlayQueue()
     }
   }
 
@@ -541,30 +617,46 @@ function App() {
 
   const selectedPlaylistItem = state.playlists.find((playlist) => playlist.id === selectedPlaylist)
   const visibleTracks = view === 'favorites' ? favoriteTracks : searchedTracks
-  const title = view === 'home' ? 'Inicio' : view === 'tracks' ? 'Canciones' : view === 'albums' ? 'Álbumes' : view === 'artists' ? 'Artistas' : view === 'favorites' ? 'Tus favoritos' : view === 'queue' ? 'Cola de reproducción' : view === 'settings' ? 'Ajustes' : view === 'playlist' ? selectedPlaylistItem?.name || 'Playlist' : 'Tus playlists'
+  const title = view === 'home' ? 'Inicio' : view === 'tracks' ? 'Canciones' : view === 'albums' ? 'Álbumes' : view === 'artists' ? 'Artistas' : view === 'favorites' ? 'Tus favoritos' : view === 'settings' ? 'Ajustes' : view === 'playlist' ? selectedPlaylistItem?.name || 'Playlist' : 'Tus playlists'
 
   return (
-    <div className={`app-shell ${showNowPlaying ? 'with-panel' : ''}`} style={themeVariables}>
+    <div className={`app-shell ${showNowPlaying && currentTrack ? 'with-panel' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} style={themeVariables}>
       {activeTheme.backgroundImage && <div className="theme-backdrop" style={{ backgroundImage: `linear-gradient(90deg, var(--app-bg) 0%, color-mix(in srgb, var(--app-bg) 86%, transparent) 58%, color-mix(in srgb, var(--app-bg) 66%, transparent) 100%), linear-gradient(180deg, color-mix(in srgb, var(--app-bg) 72%, transparent), var(--app-bg)), url("${activeTheme.backgroundImage}")` }} />}
       <aside className="sidebar">
-        <button className="brand" onClick={() => setView('home')} aria-label="Música Nativa, inicio">
-          <span className="brand-mark"><span className="brand-ring" /><Disc3 size={19} strokeWidth={1.65} /></span>
-          <span className="brand-wordmark">música<span>nativa</span></span>
-        </button>
+        <div className="sidebar-top">
+          <button className="brand" onClick={() => setView('home')} aria-label="Música Nativa, inicio">
+            <BrandLogo />
+            <span className="brand-wordmark">música<span>nativa</span></span>
+          </button>
+          <button className="icon-button sidebar-collapse" onClick={() => setSidebarCollapsed((current) => !current)} aria-label={sidebarCollapsed ? 'Mostrar el menú completo' : 'Dejar solo los iconos'} title={sidebarCollapsed ? 'Mostrar el menú completo' : 'Dejar solo los iconos'}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button>
+        </div>
 
+        <div className="sidebar-section-heading"><span>Tu biblioteca</span></div>
         <nav className="primary-nav" aria-label="Biblioteca">
-          {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} aria-label={label} aria-current={view === id ? 'page' : undefined} title={label} onClick={() => { setView(id); if (id === 'queue') void refreshQueue() }}><Icon size={18} strokeWidth={1.8} /><span>{label}</span>{id === 'tracks' && state.tracks.length > 0 && <small>{state.tracks.length}</small>}</button>)}
+          {navItems.map(({ id, label, icon: Icon }) => {
+            const active = view === id || (id === 'albums' && view === 'album') || (id === 'artists' && view === 'artist')
+            const count = navCounts[id]
+            return <button key={id} className={`nav-item ${active ? 'active' : ''}`} aria-label={count ? `${label}, ${count}` : label} aria-current={active ? 'page' : undefined} title={label} onClick={() => setView(id)}><span className="nav-chip"><Icon size={17} strokeWidth={1.9} /></span><span className="nav-label">{label}</span>{count ? <small>{count}</small> : null}</button>
+          })}
         </nav>
 
-        <div className="sidebar-rule" />
-        <div className="sidebar-section-heading"><span>Playlists</span><button className="icon-button tiny" onClick={() => setShowPlaylistForm(true)} aria-label="Crear playlist"><Plus size={16} /></button></div>
+        <div className="sidebar-section-heading"><span>Playlists</span><button className="icon-button tiny" onClick={() => setShowPlaylistForm(true)} aria-label="Crear playlist" title="Crear playlist"><Plus size={16} /></button></div>
         <nav className="playlist-nav" aria-label="Playlists">
-          {state.playlists.slice(0, 6).map((playlist) => <button key={playlist.id} className={`nav-item playlist-link ${view === 'playlist' && selectedPlaylist === playlist.id ? 'active' : ''}`} aria-label={`Playlist ${playlist.name}`} aria-current={view === 'playlist' && selectedPlaylist === playlist.id ? 'page' : undefined} title={playlist.name} onClick={() => void loadPlaylist(playlist.id)}><ListMusic size={17} /><span>{playlist.name}</span></button>)}
-          {!state.playlists.length && <span className="sidebar-empty">Tus playlists aparecerán aquí.</span>}
+          {state.playlists.map((playlist) => {
+            const active = view === 'playlist' && selectedPlaylist === playlist.id
+            const covers = playlist.covers ?? []
+            return <button key={playlist.id} className={`nav-item playlist-link ${active ? 'active' : ''}`} aria-label={`Playlist ${playlist.name}, ${playlist.trackCount} ${playlist.trackCount === 1 ? 'canción' : 'canciones'}`} aria-current={active ? 'page' : undefined} title={playlist.name} onClick={() => void loadPlaylist(playlist.id)}>
+              <span className={`nav-playlist-art ${covers.length >= 4 ? 'four' : ''}`} style={covers.length ? undefined : coverStyle(undefined, playlistShade(playlist.name))}>
+                {covers.length ? (covers.length >= 4 ? covers : covers.slice(0, 1)).map((cover) => <span key={cover} style={{ backgroundImage: `url("${cover}")` }} />) : playlist.name.trim().charAt(0).toLocaleUpperCase() || '♪'}
+              </span>
+              <span className="nav-label playlist-text"><strong>{playlist.name}</strong><small>{playlist.trackCount} {playlist.trackCount === 1 ? 'canción' : 'canciones'}</small></span>
+            </button>
+          })}
+          {!state.playlists.length && <button className="sidebar-create" onClick={() => setShowPlaylistForm(true)} title="Crear playlist"><span className="nav-chip"><Plus size={16} /></span><span className="nav-label">Crea tu primera playlist</span></button>}
         </nav>
 
         <div className="sidebar-bottom">
-          <button className={`nav-item settings-link ${view === 'settings' ? 'active' : ''}`} aria-label={update.phase === 'available' ? 'Ajustes, hay una versión nueva' : 'Ajustes'} aria-current={view === 'settings' ? 'page' : undefined} title={update.phase === 'available' ? 'Ajustes · versión nueva disponible' : 'Ajustes'} onClick={() => setView('settings')}><Settings2 size={18} /><span>Ajustes</span>{update.phase === 'available' && <i className="update-dot" aria-hidden="true" />}</button>
+          <button className={`nav-item settings-link ${view === 'settings' ? 'active' : ''}`} aria-label={update.phase === 'available' ? 'Ajustes, hay una versión nueva' : 'Ajustes'} aria-current={view === 'settings' ? 'page' : undefined} title={update.phase === 'available' ? 'Ajustes · versión nueva disponible' : 'Ajustes'} onClick={() => setView('settings')}><span className="nav-chip"><Settings size={17} strokeWidth={1.9} /></span><span className="nav-label">Ajustes</span>{update.phase === 'available' && <i className="update-dot" aria-hidden="true" />}</button>
         </div>
       </aside>
 
@@ -577,32 +669,31 @@ function App() {
         <div className="scroll-area">
           <AnimatePresence mode="wait" initial={!reducedMotion}>
             <motion.section key={`${view}-${selectedPlaylist}`} className="page-content" initial={reducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? undefined : { opacity: 0, y: -5 }} transition={{ duration: reducedMotion ? 0 : 0.2, ease: 'easeOut' }}>
-              {view === 'home' && <HomePage tracks={state.tracks} albums={albums} currentTrack={currentTrack} isPlaying={isPlaying} scanning={state.scanning} onPlay={(track) => void playTrack(track, state.tracks)} onPlayAlbum={(album) => void playTrack(album.tracks[0], album.tracks)} onToggle={() => void togglePlay()} onBrowse={() => void chooseFolders()} onViewTracks={() => setView('tracks')} onViewAlbums={() => setView('albums')} />}
-              {view === 'tracks' && <TrackPage title={title} tracks={visibleTracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track) => void playTrack(track, visibleTracks)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => void startScan()} onChooseFolders={() => void chooseFolders()} scanning={state.scanning} />}
-              {view === 'favorites' && <TrackPage title={title} tracks={visibleTracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track) => void playTrack(track, visibleTracks)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => void startScan()} onChooseFolders={() => void chooseFolders()} scanning={state.scanning} />}
-              {view === 'albums' && <AlbumPage albums={albums.filter((album) => !normalizedQuery || `${album.name} ${album.artist}`.toLocaleLowerCase().includes(normalizedQuery))} onPlay={(album) => { void playTrack(album.tracks[0], album.tracks) }} />}
-              {view === 'artists' && <ArtistPage artists={artists.filter((artist) => !normalizedQuery || artist.toLocaleLowerCase().includes(normalizedQuery))} tracksByArtist={tracksByArtist} onPlay={(artistTracks) => { if (artistTracks[0]) void playTrack(artistTracks[0], artistTracks) }} />}
+              {view === 'home' && <HomePage tracks={state.tracks} albums={albums} history={history} currentTrack={currentTrack} scanning={state.scanning} onPlay={(track, list) => void playTrack(track, list)} onPlayAlbum={playAlbum} onOpenAlbum={openAlbum} onOpenArtist={openArtist} onToggle={() => void togglePlay()} onResume={() => void resumeListening()} onShuffleAll={() => void shufflePlay(state.tracks)} onFavorites={() => void shufflePlay(state.tracks.filter((track) => track.favorite))} onBrowse={() => void chooseFolders()} onViewAlbums={() => setView('albums')} />}
+              {view === 'tracks' && <TrackPage manageLibrary title={title} tracks={visibleTracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track, list) => void playTrack(track, list)} onShuffle={(list) => void shufflePlay(list)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => void startScan()} onChooseFolders={() => void chooseFolders()} scanning={state.scanning} />}
+              {view === 'favorites' && <FavoritesView tracks={visibleTracks} searching={!!normalizedQuery} onPlay={() => { const first = visibleTracks.find((track) => track.available); if (first) void playTrack(first, visibleTracks) }} onShuffle={() => void shufflePlay(visibleTracks)} onBrowse={() => setView('tracks')}><TrackPage title={title} tracks={visibleTracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track, list) => void playTrack(track, list)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => {}} onChooseFolders={() => {}} scanning={false} showHeading={false} toolbar={false} /></FavoritesView>}
+              {view === 'albums' && <AlbumsPage albums={albums.filter((album) => !normalizedQuery || `${album.name} ${album.artist}`.toLocaleLowerCase().includes(normalizedQuery))} onOpen={openAlbum} onPlay={playAlbum} />}
+              {view === 'album' && openedAlbum && <AlbumView album={openedAlbum} onBack={() => setView('albums')} onPlay={() => playAlbum(openedAlbum)} onShuffle={() => void shufflePlay(openedAlbum.tracks)}><TrackPage title={openedAlbum.name} tracks={openedAlbum.tracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track, list) => void playTrack(track, list)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => {}} onChooseFolders={() => {}} scanning={false} showHeading={false} toolbar={false} albumView defaultSort="order" /></AlbumView>}
+              {view === 'artists' && <ArtistsPage artists={artistSummaries.filter((artist) => !normalizedQuery || artist.name.toLocaleLowerCase().includes(normalizedQuery))} onOpen={(artist) => openArtist(artist.key)} onPlay={playArtist} />}
+              {view === 'artist' && openedArtist && <ArtistView artist={openedArtist} albums={artistAlbums(openedArtist.key, albums)} onBack={() => setView('artists')} onPlay={() => playArtist(openedArtist)} onShuffle={() => void shufflePlay(openedArtist.tracks)} onOpenAlbum={openAlbum} onPlayAlbum={playAlbum}><TrackPage title={openedArtist.name} tracks={openedArtist.tracks} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track, list) => void playTrack(track, list)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={() => {}} onChooseFolders={() => {}} scanning={false} showHeading={false} toolbar={false} defaultSort="order" /></ArtistView>}
               {view === 'playlists' && <PlaylistPage playlists={state.playlists} onOpen={(id) => void loadPlaylist(id)} onCreate={() => setShowPlaylistForm(true)} />}
               {view === 'playlist' && <PlaylistDetail playlist={selectedPlaylistItem} tracks={queue} currentPath={playbackPath} isPlaying={isPlaying} onPlay={(track) => void playTrack(track, queue)} onFavorite={(track) => void toggleFavorite(track)} onQueue={(track) => void addToQueue(track)} onPlaylist={(track) => void addToPlaylist(track)} onRefresh={refreshQueue} />}
-              {view === 'lyrics' && <LyricsView track={currentTrack} reducedMotion={!!reducedMotion} onSeek={seekLyrics} onError={(error) => notify(displayError(error))} />}
-              {view === 'queue' && <QueuePage tracks={queue} currentPath={playbackPath} onPlay={(track) => void playTrack(track, queue)} />}
-              {view === 'settings' && <SettingsPage state={state} activeTheme={activeTheme} editor={editor} imagePreview={imagePreview} update={update} updateRunning={updateRunning} onUpdate={() => void updateNow()} onTheme={(theme) => void selectTheme(theme)} onEdit={setEditor} onSave={() => void saveTheme()} onImage={readBackground} onAudio={setAudioOptions} onEqualizer={() => { setShowQueue(false); setShowEqualizer(true) }} onChooseFolders={() => void chooseFolders()} onRemoveFolder={async (path) => { try { await LibraryService.RemoveMusicFolder(path); await refreshState() } catch (error) { notify(displayError(error)) } }} onRefresh={() => void startScan()} />}
+              {view === 'settings' && <SettingsPage state={state} activeTheme={activeTheme} editor={editor} imagePreview={imagePreview} update={update} updateRunning={updateRunning} onUpdate={() => void updateNow()} onTheme={(theme) => void selectTheme(theme)} onEdit={setEditor} onSave={() => void saveTheme()} onImage={readBackground} onAudio={setAudioOptions} onEqualizer={() => bringUp('equalizer')} onChooseFolders={() => void chooseFolders()} onRemoveFolder={async (path) => { try { await LibraryService.RemoveMusicFolder(path); await refreshState() } catch (error) { notify(displayError(error)) } }} onRefresh={() => void startScan()} />}
             </motion.section>
           </AnimatePresence>
         </div>
 
       </main>
 
-      {showNowPlaying && <NowPlayingPanel onShowQueue={() => { setView('queue'); void refreshQueue() }} track={currentTrack} queue={playQueue} onPlay={(track) => void playTrack(track, playQueue)} onFavorite={currentTrack ? () => void toggleFavorite(currentTrack) : undefined} onClose={() => setShowNowPlaying(false)} />}
-      <PlayerBar track={currentTrack} onToggle={() => void togglePlay()} onNext={() => void playNext()} onPrevious={() => void playPrevious()} onSeek={(value) => LibraryService.SeekTo(value).then(setPlayback)} onVolume={(value) => { void LibraryService.SetVolume(value).then(setPlayback) }} onFavorite={currentTrack ? () => void toggleFavorite(currentTrack) : undefined} lyricsOpen={view === 'lyrics'} onLyrics={toggleLyrics} eqOpen={showEqualizer} onEqualizer={toggleEqualizer} panelOpen={narrow ? showQueue : showNowPlaying} onTogglePanel={togglePlayingView} playMode={playMode} onShuffle={() => void toggleShuffle()} onRepeat={() => void cycleRepeat()} />
+      {showNowPlaying && currentTrack && <NowPlayingPanel onShowQueue={() => { bringUp('queue'); loadPlayQueue() }} track={currentTrack} queue={playQueue} onPlay={(track) => void playTrack(track, playQueue)} onFavorite={currentTrack ? () => void toggleFavorite(currentTrack) : undefined} onClose={() => setShowNowPlaying(false)} />}
+      <PlayerBar track={currentTrack} onToggle={() => void togglePlay()} onNext={() => void playNext()} onPrevious={() => void playPrevious()} onSeek={(value) => LibraryService.SeekTo(value).then(setPlayback)} onVolume={(value) => { void LibraryService.SetVolume(value).then(setPlayback) }} onFavorite={currentTrack ? () => void toggleFavorite(currentTrack) : undefined} lyricsOpen={showLyrics} onLyrics={toggleLyrics} eqOpen={showEqualizer} onEqualizer={toggleEqualizer} panelOpen={narrow ? showQueue : showNowPlaying} onTogglePanel={togglePlayingView} playMode={playMode} onShuffle={() => void toggleShuffle()} onRepeat={() => void cycleRepeat()} onArtist={(track) => openArtist(nameKey(track.artist))} onAlbum={(track) => { const album = albums.find((item) => item.key === albumKey(track)); if (album) openAlbum(album) }} />
 
-      <AnimatePresence>
-        {showQueue && <motion.aside className="queue-drawer" initial={reducedMotion ? false : { x: 22, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 22, opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}><QueuePage tracks={queue} currentPath={playbackPath} onPlay={(track) => void playTrack(track, queue)} onClose={() => setShowQueue(false)} /></motion.aside>}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showEqualizer && <motion.div key="equalizer" className="eq-popover" initial={reducedMotion ? false : { y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 8, opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.16 }}><EqualizerPanel onClose={() => setShowEqualizer(false)} onError={(error) => notify(displayError(error))} /></motion.div>}
-      </AnimatePresence>
+      {panels.map((id, layer) => <FloatingPanel key={id} id={id} layer={layer} title={panelTitles[id]} icon={panelIcons[id]} initial={panelStart[id]} min={panelMin[id]}
+        onFocus={() => setPanels((open) => raisePanel(open, id))} onClose={() => setPanels((open) => open.filter((panel) => panel !== id))}>
+        {id === 'equalizer' ? <EqualizerPanel onError={(error) => notify(displayError(error))} />
+          : id === 'queue' ? <QueuePage tracks={playQueue} currentPath={playbackPath} onPlay={(track) => void playTrack(track, playQueue)} />
+            : <LyricsView track={currentTrack} reducedMotion={!!reducedMotion} onSeek={seekLyrics} onError={(error) => notify(displayError(error))} />}
+      </FloatingPanel>)}
 
       <ScanStatus onViewLibrary={() => setView('tracks')} />
       <AnimatePresence>{toast && <motion.div className="toast" role="status" initial={reducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }} transition={{ duration: reducedMotion ? 0 : 0.16 }}><span className="toast-dot" />{toast}<button onClick={() => setToast('')} aria-label="Cerrar aviso"><X size={15} /></button></motion.div>}</AnimatePresence>
@@ -619,39 +710,6 @@ function App() {
 
 function PageHeading({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   return <div className="page-heading"><div><h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>{action && <div className="heading-actions">{action}</div>}</div>
-}
-
-function HomePage({ tracks, albums, currentTrack, isPlaying, scanning, onPlay, onPlayAlbum, onToggle, onBrowse, onViewTracks, onViewAlbums }: { tracks: Track[]; albums: AlbumGroup[]; currentTrack?: Track; isPlaying: boolean; scanning: boolean; onPlay: (track: Track) => void; onPlayAlbum: (album: AlbumGroup) => void; onToggle: () => void; onBrowse: () => void; onViewTracks: () => void; onViewAlbums: () => void }) {
-  if (!tracks.length) {
-    return <><PageHeading title="Inicio" /><section className="empty-library"><div className="empty-icon"><FolderPlus size={22} /></div><div><h2>{scanning ? 'Buscando música en tus carpetas…' : 'Todavía no hay música por aquí.'}</h2><p>Elige una o más carpetas y Música Nativa leerá tus archivos MP3, WAV y FLAC sin moverlos.</p></div><button className="primary-button" onClick={onBrowse} disabled={scanning}><FolderPlus size={16} /> {scanning ? 'Buscando…' : 'Elegir carpetas'}</button></section></>
-  }
-  const newestTracks = tracks.filter((track) => track.available).sort((a, b) => b.modifiedUnix - a.modifiedUnix).slice(0, 6)
-  const newestAlbums = albums
-    .map((album) => ({ album, added: Math.max(...album.tracks.map((track) => track.modifiedUnix)) }))
-    .sort((a, b) => b.added - a.added)
-    .slice(0, 10)
-    .map(({ album }) => album)
-  const startAlbum = newestAlbums[0]
-  return <>
-    <section className="continue-section">
-      <h2>{currentTrack ? (isPlaying ? 'Sonando ahora' : 'Seguir escuchando') : 'Para empezar'}</h2>
-      {currentTrack ? <div className="continue-card">
-        <span className="continue-art" style={coverStyle(currentTrack, 0)}>{currentTrack.coverUrl ? null : <Disc3 size={30} strokeWidth={1.3} />}</span>
-        <span className="continue-text"><strong>{currentTrack.title}</strong><small>{currentTrack.artist} · {currentTrack.album}</small></span>
-        <button className="continue-play" onClick={onToggle} aria-label={isPlaying ? 'Pausar' : 'Reanudar'}>{isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
-      </div> : startAlbum && <div className="continue-card">
-        <span className="continue-art" style={coverStyle(startAlbum.tracks[0], 0)}>{startAlbum.tracks[0]?.coverUrl ? null : <Disc3 size={30} strokeWidth={1.3} />}</span>
-        <span className="continue-text"><strong>{startAlbum.name}</strong><small>{startAlbum.artist} · {startAlbum.tracks.length} {startAlbum.tracks.length === 1 ? 'canción' : 'canciones'}</small></span>
-        <button className="continue-play" onClick={() => onPlayAlbum(startAlbum)} aria-label={`Reproducir ${startAlbum.name}`}><Play size={20} fill="currentColor" /></button>
-      </div>}
-    </section>
-
-    <div className="section-heading"><h2>Añadido recientemente</h2><button className="text-button" onClick={onViewAlbums}>Ver álbumes <ArrowUpRight size={15} /></button></div>
-    <div className="album-shelf">{newestAlbums.map((album, index) => <button className="shelf-item" key={album.key} onClick={() => onPlayAlbum(album)} aria-label={`Reproducir ${album.name}, de ${album.artist}`}><span className="shelf-art" style={coverStyle(album.tracks[0], index)}>{album.tracks[0]?.coverUrl ? null : <Disc3 size={34} strokeWidth={1.2} />}<span className="shelf-play"><Play size={16} fill="currentColor" /></span></span><strong>{album.name}</strong><small>{album.artist}</small></button>)}</div>
-
-    <div className="section-heading"><h2>Canciones nuevas</h2><button className="text-button" onClick={onViewTracks}>Ver canciones <ArrowUpRight size={15} /></button></div>
-    <div className="recent-list">{newestTracks.map((track, index) => <button className="recent-track" key={track.id} onClick={() => onPlay(track)}><span className="recent-cover" style={coverStyle(track, index)}>{track.coverUrl ? null : <Music2 size={17} />}</span><span className="recent-info"><strong>{track.title}</strong><small>{track.artist} · {track.album}</small></span><span className="recent-duration">{formatDuration(track.durationSeconds)}</span><span className="recent-play"><Play size={14} fill="currentColor" /></span></button>)}</div>
-  </>
 }
 
 // upNextShown is how many of the next songs the panel lists; the queue page has them all.
@@ -677,10 +735,41 @@ function NowPlayingPanel({ track, queue, onPlay, onFavorite, onClose, onShowQueu
   </aside>
 }
 
-function TrackPage({ title, tracks, currentPath, isPlaying, onPlay, onFavorite, onQueue, onPlaylist, onRefresh, onChooseFolders, scanning, showHeading = true }: { title: string; tracks: Track[]; currentPath: string; isPlaying: boolean; onPlay: (track: Track) => void; onFavorite: (track: Track) => void; onQueue: (track: Track) => void; onPlaylist: (track: Track) => void; onRefresh: () => void; onChooseFolders: () => void; scanning: boolean; showHeading?: boolean }) {
+function TrackPage({ title, tracks, currentPath, isPlaying, onPlay, onShuffle, onFavorite, onQueue, onPlaylist, onRefresh, onChooseFolders, scanning, showHeading = true, manageLibrary = false, defaultSort = 'title', toolbar = true, albumView = false }: { title: string; tracks: Track[]; currentPath: string; isPlaying: boolean; onPlay: (track: Track, list: Track[]) => void; onShuffle?: (list: Track[]) => void; onFavorite: (track: Track) => void; onQueue: (track: Track) => void; onPlaylist: (track: Track) => void; onRefresh: () => void; onChooseFolders: () => void; scanning: boolean; showHeading?: boolean; manageLibrary?: boolean; defaultSort?: SortKey; toolbar?: boolean; albumView?: boolean }) {
+  const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: defaultSort, descending: false })
+  const sorted = useMemo(() => sortTracks(tracks, sort.key, sort.descending), [tracks, sort])
+  const firstPlayable = sorted.find((track) => track.available)
+  const totalSeconds = tracks.reduce((total, track) => total + (track.durationSeconds || 0), 0)
+  const sortBy = (key: SortKey) => setSort((current) => (current.key === key ? { key, descending: !current.descending } : { key, descending: false }))
+  const header = (key: SortKey, label: ReactNode, className = '') => <th className={className} aria-sort={sort.key === key ? (sort.descending ? 'descending' : 'ascending') : undefined}>
+    <button className={`sort-button ${sort.key === key ? 'active' : ''}`} onClick={() => sortBy(key)} aria-label={`Ordenar por ${sortNames[key].toLowerCase()}`}>{label}{sort.key === key && (sort.descending ? <ChevronDown size={13} /> : <ChevronUp size={13} />)}</button>
+  </th>
+  const play = (track: Track) => track.available && onPlay(track, sorted)
   return <>
-    {showHeading && <PageHeading title={title} subtitle={`${tracks.length} ${tracks.length === 1 ? 'canción' : 'canciones'} en tu biblioteca local.`} action={<><button className="secondary-button compact-button" onClick={onRefresh} disabled={scanning}><RefreshCw className={scanning ? 'spinning' : ''} size={15} />{scanning ? 'Actualizando' : 'Actualizar'}</button><button className="primary-button compact-button" onClick={onChooseFolders}><FolderPlus size={15} /> Añadir carpeta</button></>} />}
-    {tracks.length ? <div className="track-table-wrap" role="region" aria-label="Canciones; desplázate horizontalmente para ver todas las columnas" tabIndex={0}><table className="track-table"><thead><tr><th className="number-col">#</th><th>Título</th><th>Álbum</th><th>Formato</th><th><Clock3 size={14} /></th><th /></tr></thead><tbody>{tracks.map((track, index) => <tr key={track.id} className={`${currentPath === track.path ? 'current' : ''} ${track.available ? '' : 'missing'}`} onDoubleClick={() => track.available && onPlay(track)}><td className="row-number"><button className="row-play" onClick={() => track.available && onPlay(track)} aria-label={`Reproducir ${track.title}`}>{currentPath === track.path && isPlaying ? <AudioLines size={16} /> : <><span>{String(index + 1).padStart(2, '0')}</span><Play size={14} fill="currentColor" /></>}</button></td><td><button className="track-cell" onClick={() => track.available && onPlay(track)}><span className="table-cover" style={coverStyle(track, index)}>{track.coverUrl ? null : <Music2 size={14} />}</span><span className="table-title"><strong>{track.title}</strong><small>{track.artist}{!track.available && <em> · Archivo no disponible</em>}</small></span></button></td><td className="album-cell">{track.album}</td><td><span className="format-tag">{track.format}</span></td><td className="duration-cell">{formatDuration(track.durationSeconds)}</td><td><div className="row-actions"><button className={`row-icon ${track.favorite ? 'liked' : ''}`} onClick={() => onFavorite(track)} aria-label={track.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}><Heart size={15} fill={track.favorite ? 'currentColor' : 'none'} /></button><button className="row-icon" onClick={() => onQueue(track)} aria-label="Añadir a la cola"><Plus size={16} /></button><TrackMenu onPlaylist={() => onPlaylist(track)} onQueue={() => onQueue(track)} /></div></td></tr>)}</tbody></table></div> : <div className="empty-state"><div className="empty-icon"><Music2 size={23} /></div><h2>No encontramos canciones.</h2><p>Prueba con otra búsqueda o conecta una carpeta con música.</p><button className="secondary-button" onClick={onChooseFolders}><FolderPlus size={15} /> Añadir carpeta</button></div>}
+    {showHeading && <PageHeading title={title} subtitle={`${tracks.length} ${tracks.length === 1 ? 'canción' : 'canciones'} · ${formatLength(totalSeconds)}`} />}
+    {toolbar && tracks.length > 0 && <div className="track-toolbar">
+      <button className="toolbar-play" disabled={!firstPlayable} onClick={() => firstPlayable && onPlay(firstPlayable, sorted)} aria-label={`Reproducir ${title}`} title="Reproducir"><Play size={22} fill="currentColor" className="play-icon" /></button>
+      {onShuffle && <button className="secondary-button" onClick={() => onShuffle(sorted)}><Shuffle size={15} /> Aleatorio</button>}
+      <label className="sort-select"><span>Ordenar por</span>
+        <select value={sort.key} onChange={(event) => setSort({ key: event.target.value as SortKey, descending: false })}>
+          {(Object.keys(sortNames) as SortKey[]).filter((key) => key !== 'order' || defaultSort === 'order').map((key) => <option key={key} value={key}>{sortNames[key]}</option>)}
+        </select>
+      </label>
+      {manageLibrary && <div className="toolbar-library">
+        <button className="quiet-button compact-button" onClick={onRefresh} disabled={scanning}><RefreshCw className={scanning ? 'spinning' : ''} size={15} />{scanning ? 'Actualizando' : 'Actualizar'}</button>
+        <button className="quiet-button compact-button" onClick={onChooseFolders}><FolderPlus size={15} /> Añadir carpeta</button>
+      </div>}
+    </div>}
+    {tracks.length ? <div className="track-table-wrap" role="region" aria-label="Canciones; desplázate horizontalmente para ver todas las columnas" tabIndex={0}><table className="track-table"><thead><tr><th className="number-col">#</th>{header('title', 'Título')}{!albumView && header('album', 'Álbum')}{header('duration', <Clock3 size={14} />, 'duration-col')}<th /></tr></thead><tbody>{sorted.map((track, index) => {
+      const current = currentPath === track.path
+      return <tr key={track.id} className={`${current ? 'current' : ''} ${track.available ? '' : 'missing'}`} onDoubleClick={() => play(track)}>
+        <td className="row-number"><button className="row-play" onClick={() => play(track)} aria-label={`Reproducir ${track.title}`}>{current ? <span className={`listening-bars ${isPlaying ? 'live' : ''}`} aria-hidden="true"><i /><i /><i /></span> : <span className="row-index">{String(albumView && track.trackNumber ? track.trackNumber : index + 1).padStart(2, '0')}</span>}<Play size={14} fill="currentColor" /></button></td>
+        <td><button className="track-cell" onClick={() => play(track)}><span className="table-cover" style={coverStyle(track, index)}>{track.coverUrl ? null : <Music2 size={14} />}</span><span className="table-title"><strong>{track.title}{track.format && track.format !== 'MP3' && <span className="quality-tag">{track.format}</span>}</strong><small>{track.artist}{!track.available && <em> · Archivo no disponible</em>}</small></span></button></td>
+        {!albumView && <td className="album-cell">{track.album}</td>}
+        <td className="duration-cell">{formatDuration(track.durationSeconds)}</td>
+        <td><div className="row-actions"><button className={`row-icon ${track.favorite ? 'liked' : ''}`} onClick={() => onFavorite(track)} aria-label={track.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}><Heart size={15} fill={track.favorite ? 'currentColor' : 'none'} /></button><button className="row-icon" onClick={() => onQueue(track)} aria-label="Añadir a la cola"><Plus size={16} /></button><TrackMenu onPlaylist={() => onPlaylist(track)} onQueue={() => onQueue(track)} /></div></td>
+      </tr>
+    })}</tbody></table></div> : <div className="empty-state"><div className="empty-icon"><Music2 size={23} /></div><h2>No encontramos canciones.</h2><p>Prueba con otra búsqueda o conecta una carpeta con música.</p><button className="secondary-button" onClick={onChooseFolders}><FolderPlus size={15} /> Añadir carpeta</button></div>}
   </>
 }
 
@@ -689,20 +778,12 @@ function TrackMenu({ onPlaylist, onQueue }: { onPlaylist: () => void; onQueue: (
   return <div className="track-menu"><button className="row-icon" onClick={() => setOpen((value) => !value)} aria-label="Más acciones"><Ellipsis size={17} /></button>{open && <><button className="menu-dismiss" onClick={() => setOpen(false)} aria-label="Cerrar menú" /><div className="track-menu-pop"><button onClick={() => { onQueue(); setOpen(false) }}><Plus size={14} /> Añadir a la cola</button><button onClick={() => { onPlaylist(); setOpen(false) }}><ListMusic size={14} /> Añadir a playlist</button></div></>}</div>
 }
 
-function AlbumPage({ albums, onPlay }: { albums: AlbumGroup[]; onPlay: (album: AlbumGroup) => void }) {
-  return <><PageHeading title="Álbumes" subtitle="Tu colección, ordenada por arte y artista." />{albums.length ? <div className="album-grid">{albums.map((album, index) => <button className="album-card" key={album.key} onClick={() => onPlay(album)}><span className="album-card-art" style={coverStyle(album.tracks[0], index)}>{album.tracks[0]?.coverUrl ? null : <Disc3 size={45} strokeWidth={1.15} />}</span><span className="album-card-meta"><strong>{album.name}</strong><small>{album.artist}</small><span>{album.tracks.length} {album.tracks.length === 1 ? 'canción' : 'canciones'}</span></span><span className="card-play"><Play size={15} fill="currentColor" /></span></button>)}</div> : <div className="empty-state"><div className="empty-icon"><Disc3 size={23} /></div><h2>Aún no hay álbumes.</h2><p>Los álbumes aparecen a partir de los metadatos de tu música.</p></div>}</>
-}
-
-function ArtistPage({ artists, tracksByArtist, onPlay }: { artists: string[]; tracksByArtist: Map<string, Track[]>; onPlay: (tracks: Track[]) => void }) {
-  return <><PageHeading title="Artistas" subtitle="Encuentra rápido a quien quieres escuchar." />{artists.length ? <div className="artist-grid">{artists.map((artist, index) => { const songs = tracksByArtist.get(artist) ?? []; return <button className="artist-card" key={artist} onClick={() => onPlay(songs)}><span className={`artist-avatar avatar-${index % 5}`}><Mic2 size={24} strokeWidth={1.3} /></span><strong>{artist}</strong><small>{songs.length} canciones</small><span className="artist-play"><Play size={14} fill="currentColor" /></span></button> })}</div> : <div className="empty-state"><div className="empty-icon"><Mic2 size={23} /></div><h2>Todavía no hay artistas.</h2><p>Al añadir música, organizaremos aquí los artistas.</p></div>}</>
-}
-
 function PlaylistPage({ playlists, onOpen, onCreate }: { playlists: AppState['playlists']; onOpen: (id: string) => void; onCreate: () => void }) {
   return <><PageHeading title="Tus playlists" subtitle="Guarda tus canciones para volver a ellas cuando quieras." action={<button className="primary-button compact-button" onClick={onCreate}><Plus size={16} /> Nueva playlist</button>} />{playlists.length ? <div className="playlist-grid">{playlists.map((playlist, index) => <button className="playlist-card" key={playlist.id} onClick={() => onOpen(playlist.id)}><span className={`playlist-art playlist-art-${index % 4}`}><ListMusic size={27} strokeWidth={1.25} /></span><strong>{playlist.name}</strong><small>{playlist.trackCount} {playlist.trackCount === 1 ? 'canción' : 'canciones'}</small><span className="playlist-open"><ArrowUpRight size={15} /></span></button>)}</div> : <div className="empty-state"><div className="empty-icon"><ListMusic size={23} /></div><h2>Tu primera playlist empieza aquí.</h2><p>Junta canciones con una historia en común.</p><button className="secondary-button" onClick={onCreate}><Plus size={15} /> Crear playlist</button></div>}</>
 }
 
-function PlaylistDetail({ playlist, tracks, currentPath, isPlaying, onPlay, onFavorite, onQueue, onPlaylist, onRefresh }: { playlist?: AppState['playlists'][number]; tracks: Track[]; currentPath: string; isPlaying: boolean; onPlay: (track: Track) => void; onFavorite: (track: Track) => void; onQueue: (track: Track) => void; onPlaylist: (track: Track) => void; onRefresh: () => void }) {
-  return <><PageHeading title={playlist?.name || 'Playlist'} subtitle={`${tracks.length} canciones · guardada en este equipo.`} action={<button className="primary-button compact-button" disabled={!tracks.length} onClick={() => tracks[0] && onPlay(tracks[0])}><Play size={15} fill="currentColor" /> Reproducir</button>} />{tracks.length ? <TrackPage title={playlist?.name || 'Playlist'} tracks={tracks} currentPath={currentPath} isPlaying={isPlaying} onPlay={onPlay} onFavorite={onFavorite} onQueue={onQueue} onPlaylist={onPlaylist} onRefresh={onRefresh} onChooseFolders={() => {}} scanning={false} showHeading={false} /> : <div className="empty-state"><div className="empty-icon"><ListMusic size={23} /></div><h2>Esta playlist está lista para llenarse.</h2><p>Desde Canciones, abre el menú de acciones y elige “Añadir a playlist”.</p></div>}</>
+function PlaylistDetail({ playlist, tracks, currentPath, isPlaying, onPlay, onFavorite, onQueue, onPlaylist, onRefresh }: { playlist?: AppState['playlists'][number]; tracks: Track[]; currentPath: string; isPlaying: boolean; onPlay: (track: Track, list?: Track[]) => void; onFavorite: (track: Track) => void; onQueue: (track: Track) => void; onPlaylist: (track: Track) => void; onRefresh: () => void }) {
+  return <><PageHeading title={playlist?.name || 'Playlist'} subtitle={`${tracks.length} canciones · guardada en este equipo.`} />{tracks.length ? <TrackPage defaultSort="order" title={playlist?.name || 'Playlist'} tracks={tracks} currentPath={currentPath} isPlaying={isPlaying} onPlay={onPlay} onFavorite={onFavorite} onQueue={onQueue} onPlaylist={onPlaylist} onRefresh={onRefresh} onChooseFolders={() => {}} scanning={false} showHeading={false} /> : <div className="empty-state"><div className="empty-icon"><ListMusic size={23} /></div><h2>Esta playlist está lista para llenarse.</h2><p>Desde Canciones, abre el menú de acciones y elige “Añadir a playlist”.</p></div>}</>
 }
 
 function QueuePage({ tracks, currentPath, onPlay, onClose }: { tracks: Track[]; currentPath: string; onPlay: (track: Track) => void; onClose?: () => void }) {
@@ -726,7 +807,7 @@ function SettingsPage({ state, activeTheme, editor, imagePreview, update, update
             : update.phase === 'error' ? 'Intentar de nuevo'
               : update.phase === 'up-to-date' ? 'Buscar de nuevo'
                 : update.phase === 'available' ? `Actualizar${update.version ? ` a v${update.version}` : ''}`
-                  : 'Actualizar'
+                  : 'Buscar actualizaciones'
   const updatePercent = update.total > 0 ? Math.min(100, Math.floor((update.written / update.total) * 100)) : 0
   const updateMessage: Record<UpdatePhase, string> = {
     idle: 'Busca una versión nueva cuando quieras.',
@@ -740,19 +821,60 @@ function SettingsPage({ state, activeTheme, editor, imagePreview, update, update
     restarting: 'Reiniciando Música Nativa con la versión nueva…',
     error: update.message || 'No se pudo completar la actualización.',
   }
-  return <><PageHeading title="Ajustes" subtitle="Dale a tu biblioteca el ambiente que quieras y ajusta cómo suena." />
-    <section className="settings-section"><div className="settings-section-title"><span className="settings-icon"><Sparkles size={18} /></span><div><h2>Temas de reproducción</h2><p>Aplica un ambiente a toda la aplicación.</p></div><span className="settings-tag">{state.themes.length} TEMAS</span></div><div className="theme-grid">{state.themes.map((theme, index) => <div key={theme.id} className={`theme-card ${activeTheme.id === theme.id ? 'selected' : ''}`}><button className={`theme-preview theme-preview-${index % 4}`} style={{ background: theme.background }} onClick={() => onTheme(theme.id)}><span className="theme-preview-window" style={{ background: theme.surface }}><i style={{ background: theme.accent }} /><i /><i /></span>{theme.backgroundImage && <span className="theme-photo" style={{ backgroundImage: `url("${theme.backgroundImage}")` }} />}{activeTheme.id === theme.id && <span className="theme-check"><Check size={14} /></span>}</button><div className="theme-card-meta"><div><strong>{theme.name}</strong><small>{theme.builtIn ? 'Incluido' : 'Creado por ti'}</small></div><button className={`apply-theme-button ${activeTheme.id === theme.id ? 'applied' : ''}`} onClick={() => onTheme(theme.id)}>{activeTheme.id === theme.id ? 'Aplicado' : 'Aplicar'}</button></div></div>)}</div></section>
+  const [tab, setTab] = useState<SettingsTab>(() => (update.phase === 'available' ? 'about' : 'library'))
+  const [showEditor, setShowEditor] = useState(false)
+  const songs = state.tracks.length
+  const head = (title: string, text: string, aside?: ReactNode) => <div className="settings-panel-head"><div><h2>{title}</h2><p>{text}</p></div>{aside}</div>
+  return <>
+    <PageHeading title="Ajustes" subtitle="Tu biblioteca, el sonido y el aspecto de la app." />
+    <div className="settings-layout">
+      <nav className="settings-nav" aria-label="Secciones de ajustes">{settingsTabs.map(({ id, label, icon: Icon }) => <button key={id} className={`settings-nav-item ${tab === id ? 'active' : ''}`} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
+        <Icon size={17} strokeWidth={1.8} /><span>{label}</span>{id === 'about' && update.phase === 'available' && <span className="update-dot" aria-label="Hay una versión nueva" />}
+      </button>)}</nav>
+      <div className="settings-panel">
+        {tab === 'library' && <>
+          {head('Biblioteca', 'Música Nativa lee tus carpetas sin mover, copiar ni cambiar tus archivos.', <button className="secondary-button compact-button" onClick={onRefresh} disabled={state.scanning}><RefreshCw size={14} className={state.scanning ? 'spinning' : ''} /> {state.scanning ? 'Actualizando…' : 'Volver a leer'}</button>)}
+          <div className="folder-list">{state.folders.length ? state.folders.map((folder) => <div className="folder-row" key={folder}><span className="folder-mini-icon"><Library size={16} /></span><span><strong>{folder.split(/[\\/]/).pop() || folder}</strong><small>{folder}</small></span><button className="row-icon" onClick={() => onRemoveFolder(folder)} aria-label={`Quitar ${folder}`}><Trash2 size={15} /></button></div>) : <p className="folder-empty">Aún no has añadido carpetas.</p>}<button className="add-folder-row" onClick={onChooseFolders}><Plus size={15} /> Añadir carpeta</button></div>
+          <p className="settings-note">{songs} {songs === 1 ? 'canción' : 'canciones'} en {state.folders.length} {state.folders.length === 1 ? 'carpeta' : 'carpetas'}. La biblioteca se actualiza sola cada vez que abres la app.</p>
+        </>}
 
-    <section className="settings-section editor-section"><div className="settings-section-title"><span className="settings-icon"><SlidersHorizontal size={18} /></span><div><h2>Diseña un tema</h2><p>Escoge colores y una imagen para personalizarlo.</p></div></div><div className="theme-editor"><div className="editor-preview" style={{ background: editor.background, backgroundImage: imagePreview || editor.backgroundImage ? `linear-gradient(180deg, rgba(0,0,0,.08), ${editor.background}d9), url("${imagePreview || editor.backgroundImage}")` : undefined }}><div className="editor-cover" style={coverStyle(undefined, 0)}><Disc3 size={29} /></div><div className="editor-playing"><strong>Una forma propia</strong><small>Tu música, a tu manera</small></div><div className="editor-controls"><span /><span /><span /></div></div><div className="editor-fields"><label className="field-label">Nombre del tema<input value={name} onChange={(event) => { setName(event.target.value); patchTheme('name', event.target.value) }} placeholder="Mi tema" maxLength={32} /></label><div className="color-fields"><ColorField label="Fondo" value={editor.background} onChange={(value) => patchTheme('background', value)} /><ColorField label="Acento" value={editor.accent} onChange={(value) => patchTheme('accent', value)} /><ColorField label="Superficie" value={editor.surface} onChange={(value) => patchTheme('surface', value)} /><ColorField label="Texto" value={editor.text} onChange={(value) => patchTheme('text', value)} /></div><label className="image-upload"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onImage(event.target.files?.[0])} /><span className="upload-icon"><FolderPlus size={16} /></span><span><strong>Usar imagen de fondo</strong><small>JPG, PNG o WebP · máximo 8 MB</small></span><ArrowUpRight size={15} /></label><button className="primary-button save-theme-button" onClick={onSave}><Check size={15} /> Guardar tema</button></div></div></section>
+        {tab === 'sound' && <>
+          {head('Sonido', 'Por dónde sale la música y cómo suena.', <span className={`output-status ${playback.outputReady ? 'ready' : ''}`}><i />{playback.outputReady ? 'Dispositivo listo' : 'Audio sin conectar'}</span>)}
+          <div className="audio-settings">
+            <div className="output-setting"><div><strong>Modo de salida</strong><small>Compartido funciona junto a otras aplicaciones. Exclusivo intenta reservar el dispositivo solo para la música.</small></div><div className="mode-switch"><button className={outputMode === 'shared' ? 'active' : ''} onClick={() => onAudio('shared', deviceID)}>Compartido</button><button className={outputMode === 'exclusive' ? 'active' : ''} onClick={() => onAudio('exclusive', deviceID)}>Exclusivo</button></div></div>
+            <div className="output-setting device-setting"><div><strong>Dispositivo de salida</strong><small>Predeterminado sigue el dispositivo de audio elegido en Windows.</small></div><select aria-label="Dispositivo de salida" className="device-select" value={deviceID} onChange={(event) => onAudio(outputMode, event.target.value)}><option value="">Predeterminado de Windows</option>{state.outputDevices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.default ? ' · predeterminado' : ''}</option>)}</select></div>
+            <div className="output-setting eq-shortcut"><div><strong>Ecualizador</strong><small>10 bandas con preajustes, en vivo. También se abre desde la barra del reproductor o con la tecla E.</small></div><button className="secondary-button compact-button" onClick={onEqualizer}><SlidersVertical size={15} /> Abrir</button></div>
+            {playback.error && <p className="audio-message"><span />{playback.error}</p>}
+          </div>
+        </>}
 
-    <section className="settings-section updates-section"><div className="settings-section-title"><span className="settings-icon"><RefreshCw size={18} /></span><div><h2>Actualizaciones</h2><p>Un botón instala la versión nueva y reinicia la app.</p></div><span className="settings-tag">VERSIÓN {state.version}</span></div><div className="update-panel"><div className={`update-indicator ${update.phase}`}><span /></div><div className="update-copy"><strong>{update.name || 'Música Nativa'}</strong><p role="status">{updateMessage[update.phase]}</p>{update.notes && (update.phase === 'available' || update.phase === 'ready' || update.phase === 'restarting') && <pre className="update-notes">{update.notes}</pre>}{update.phase === 'downloading' && <div className="update-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={updatePercent}><span style={{ width: `${updatePercent}%` }} /></div>}</div><div className="update-actions"><button className={`${update.phase === 'available' ? 'primary-button' : 'secondary-button'} compact-button`} onClick={onUpdate} disabled={updateBusy}>{updateBusy ? <span className="update-spinner" /> : <RefreshCw size={14} />}{updateActionLabel}</button></div></div></section>
+        {tab === 'look' && <>
+          {head('Apariencia', 'Elige un tema para toda la app, o crea el tuyo.', <button className={`${showEditor ? 'secondary-button' : 'primary-button'} compact-button`} onClick={() => setShowEditor((open) => !open)}>{showEditor ? <><X size={14} /> Cerrar editor</> : <><Plus size={14} /> Crear un tema</>}</button>)}
+          <div className="theme-grid">{state.themes.map((theme, index) => <div key={theme.id} className={`theme-card ${activeTheme.id === theme.id ? 'selected' : ''}`}><button className={`theme-preview theme-preview-${index % 4}`} style={{ background: theme.background }} onClick={() => onTheme(theme.id)} aria-label={`Usar el tema ${theme.name}`}><span className="theme-preview-window" style={{ background: theme.surface }}><i style={{ background: theme.accent }} /><i /><i /></span>{theme.backgroundImage && <span className="theme-photo" style={{ backgroundImage: `url("${theme.backgroundImage}")` }} />}{activeTheme.id === theme.id && <span className="theme-check"><Check size={14} /></span>}</button><div className="theme-card-meta"><div><strong>{theme.name}</strong><small>{theme.builtIn ? 'Incluido' : 'Creado por ti'}</small></div><button className={`apply-theme-button ${activeTheme.id === theme.id ? 'applied' : ''}`} onClick={() => onTheme(theme.id)}>{activeTheme.id === theme.id ? 'En uso' : 'Usar'}</button></div></div>)}</div>
+          {showEditor && <div className="settings-subsection">
+            <h3>Tu tema</h3>
+            <div className="theme-editor"><div className="editor-preview" style={{ background: editor.background, backgroundImage: imagePreview || editor.backgroundImage ? `linear-gradient(180deg, rgba(0,0,0,.08), ${editor.background}d9), url("${imagePreview || editor.backgroundImage}")` : undefined }}><div className="editor-cover" style={coverStyle(undefined, 0)}><Disc3 size={29} /></div><div className="editor-playing"><strong>Una forma propia</strong><small>Tu música, a tu manera</small></div><div className="editor-controls"><span /><span /><span /></div></div><div className="editor-fields"><label className="field-label">Nombre del tema<input value={name} onChange={(event) => { setName(event.target.value); patchTheme('name', event.target.value) }} placeholder="Mi tema" maxLength={32} /></label><div className="color-fields"><ColorField label="Fondo" value={editor.background} onChange={(value) => patchTheme('background', value)} /><ColorField label="Acento" value={editor.accent} onChange={(value) => patchTheme('accent', value)} /><ColorField label="Superficie" value={editor.surface} onChange={(value) => patchTheme('surface', value)} /><ColorField label="Texto" value={editor.text} onChange={(value) => patchTheme('text', value)} /></div><label className="image-upload"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onImage(event.target.files?.[0])} /><span className="upload-icon"><FolderPlus size={16} /></span><span><strong>Usar imagen de fondo</strong><small>JPG, PNG o WebP · máximo 8 MB</small></span><ArrowUpRight size={15} /></label><button className="primary-button save-theme-button" onClick={onSave}><Check size={15} /> Guardar tema</button></div></div>
+          </div>}
+        </>}
 
-    <section className="settings-section"><div className="settings-section-title"><span className="settings-icon"><AudioLines size={18} /></span><div><h2>Audio</h2><p>Elige la salida y ajusta el ecualizador opcional.</p></div><span className={`output-status ${playback.outputReady ? 'ready' : ''}`}><i />{playback.outputReady ? 'DISPOSITIVO LISTO' : 'AUDIO SIN CONECTAR'}</span></div><div className="audio-settings"><div className="output-setting"><div><strong>Modo de salida</strong><small>Compartido funciona con otras aplicaciones. Exclusivo intenta reservar el dispositivo.</small></div><div className="mode-switch"><button className={outputMode === 'shared' ? 'active' : ''} onClick={() => onAudio('shared', deviceID)}>Compartido</button><button className={outputMode === 'exclusive' ? 'active' : ''} onClick={() => onAudio('exclusive', deviceID)}>Exclusivo</button></div></div><div className="output-setting device-setting"><div><strong>Dispositivo de salida</strong><small>Predeterminado sigue el dispositivo de audio elegido en Windows.</small></div><select aria-label="Dispositivo de salida" className="device-select" value={deviceID} onChange={(event) => onAudio(outputMode, event.target.value)}><option value="">Predeterminado de Windows</option>{state.outputDevices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.default ? ' · predeterminado' : ''}</option>)}</select></div><div className="output-setting eq-shortcut"><div><strong>Ecualizador</strong><small>10 bandas con preajustes, en vivo. También se abre desde la barra del reproductor o con la tecla E.</small></div><button className="secondary-button compact-button" onClick={onEqualizer}><SlidersHorizontal size={15} /> Abrir</button></div>{playback.error && <p className="audio-message"><span />{playback.error}</p>}</div></section>
+        {tab === 'lyrics' && <>
+          {head('Letras', 'Primero se buscan en tus archivos: un .lrc con el mismo nombre que la canción, o la letra guardada dentro de ella.')}
+          <div className="audio-settings"><div className="output-setting lyrics-setting"><div><strong>Buscar letras en internet</strong><small>Si la canción no trae letra, se busca en LRCLIB, una base de datos libre. Para eso se envían el título, el artista, el álbum y la duración de la canción.</small></div><button role="switch" aria-checked={lyricsOnline} aria-label="Buscar letras en internet" className={`toggle-switch ${lyricsOnline ? 'on' : ''}`} onClick={() => { const next = !lyricsOnline; setLyricsOnline(next); void LibraryService.SetLyricsOnline(next) }}><span /></button></div></div>
+          <p className="settings-note">Si una canción no tiene letra en ningún sitio, puedes añadirla tú desde la vista de letras (tecla L).</p>
+        </>}
 
-    <section className="settings-section folder-settings"><div className="settings-section-title"><span className="settings-icon"><Library size={18} /></span><div><h2>Carpetas de música</h2><p>Solo se leen metadatos: nunca copiamos ni modificamos tus canciones.</p></div><button className="text-button" onClick={onRefresh}><RefreshCw size={14} /> Actualizar</button></div><div className="folder-list">{state.folders.length ? state.folders.map((folder) => <div className="folder-row" key={folder}><span className="folder-mini-icon"><Library size={16} /></span><span><strong>{folder.split(/[\\/]/).pop() || folder}</strong><small>{folder}</small></span><button className="row-icon" onClick={() => onRemoveFolder(folder)} aria-label={`Quitar ${folder}`}><Trash2 size={15} /></button></div>) : <p className="folder-empty">Aún no has añadido carpetas.</p>}<button className="add-folder-row" onClick={onChooseFolders}><Plus size={15} /> Añadir carpeta</button></div></section>
-    <section className="settings-section"><div className="settings-section-title"><span className="settings-icon"><MicVocal size={18} /></span><div><h2>Letras</h2><p>Se buscan primero en tus archivos: un .lrc con el mismo nombre que la canción, o la letra guardada dentro de ella.</p></div></div><div className="audio-settings"><div className="output-setting lyrics-setting"><div><strong>Buscar letras en internet</strong><small>Si la canción no trae letra, se busca en LRCLIB, una base de datos libre. Para eso se envían el título, el artista, el álbum y la duración de la canción.</small></div><button role="switch" aria-checked={lyricsOnline} aria-label="Buscar letras en internet" className={`toggle-switch ${lyricsOnline ? 'on' : ''}`} onClick={() => { const next = !lyricsOnline; setLyricsOnline(next); void LibraryService.SetLyricsOnline(next) }}><span /></button></div></div></section>
-    <section className="settings-section"><div className="settings-section-title"><span className="settings-icon"><Keyboard size={18} /></span><div><h2>Atajos de teclado</h2><p>Funcionan en toda la app mientras no estés escribiendo.</p></div></div><dl className="shortcut-list">{shortcutList.map(([keys, action]) => <div key={action}><dt>{keys.map((key) => <kbd key={key}>{key}</kbd>)}</dt><dd>{action}</dd></div>)}</dl></section>
-    <div className="settings-footer"><span>VERSIÓN {state.version} · MÚSICA NATIVA</span><span>Archivos tuyos. Escucha tuya.</span></div>
+        {tab === 'keys' && <>
+          {head('Atajos de teclado', 'Funcionan en toda la app mientras no estés escribiendo.')}
+          <dl className="shortcut-list">{shortcutList.map(([keys, action]) => <div key={action}><dt>{keys.map((key) => <kbd key={key}>{key}</kbd>)}</dt><dd>{action}</dd></div>)}</dl>
+        </>}
+
+        {tab === 'about' && <>
+          {head('Acerca de', `Música Nativa ${state.version}. Archivos tuyos, escucha tuya.`)}
+          <div className="update-panel"><div className={`update-indicator ${update.phase}`}><span /></div><div className="update-copy"><strong>{update.name || 'Actualizaciones'}</strong><p role="status">{updateMessage[update.phase]}</p>{update.notes && (update.phase === 'available' || update.phase === 'ready' || update.phase === 'restarting') && <pre className="update-notes">{update.notes}</pre>}{update.phase === 'downloading' && <div className="update-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={updatePercent}><span style={{ width: `${updatePercent}%` }} /></div>}</div><div className="update-actions"><button className={`${update.phase === 'available' ? 'primary-button' : 'secondary-button'} compact-button`} onClick={onUpdate} disabled={updateBusy}>{updateBusy ? <span className="update-spinner" /> : <RefreshCw size={14} />}{updateActionLabel}</button></div></div>
+          <p className="settings-note">Al actualizar, la app descarga la versión nueva, comprueba que el archivo está bien y se reinicia sola.</p>
+        </>}
+      </div>
+    </div>
   </>
 }
 
@@ -761,14 +883,53 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
   return <label className="color-field"><span>{label}</span><span className="color-picker-wrap"><input type="color" value={hex} onChange={(event) => onChange(event.target.value)} /><i style={{ background: hex }} /></span><code>{value}</code></label>
 }
 
-function PlayerBar({ track, onToggle, onNext, onPrevious, onSeek, onVolume, onFavorite, lyricsOpen, onLyrics, eqOpen, onEqualizer, panelOpen, onTogglePanel, playMode, onShuffle, onRepeat }: { track?: Track; onToggle: () => void; onNext: () => void; onPrevious: () => void; onSeek: (value: number) => Promise<unknown>; onVolume: (value: number) => void; onFavorite?: () => void; lyricsOpen: boolean; onLyrics: () => void; eqOpen: boolean; onEqualizer: () => void; panelOpen: boolean; onTogglePanel: () => void; playMode: PlayMode; onShuffle: () => void; onRepeat: () => void }) {
+function PlayerBar({ track, onToggle, onNext, onPrevious, onSeek, onVolume, onFavorite, onArtist, onAlbum, lyricsOpen, onLyrics, eqOpen, onEqualizer, panelOpen, onTogglePanel, playMode, onShuffle, onRepeat }: { track?: Track; onToggle: () => void; onNext: () => void; onPrevious: () => void; onSeek: (value: number) => Promise<unknown>; onVolume: (value: number) => void; onFavorite?: () => void; onArtist: (track: Track) => void; onAlbum: (track: Track) => void; lyricsOpen: boolean; onLyrics: () => void; eqOpen: boolean; onEqualizer: () => void; panelOpen: boolean; onTogglePanel: () => void; playMode: PlayMode; onShuffle: () => void; onRepeat: () => void }) {
   const repeatLabel = playMode.repeat === 'one' ? 'Repetir: esta canción' : playMode.repeat === 'all' ? 'Repetir: toda la cola' : 'Repetir: desactivado'
   const playback = usePlayback((current) => current)
-  return <footer className="player-bar"><div className="now-playing"><span className="player-cover" style={coverStyle(track, 0)}>{track?.coverUrl ? null : <Disc3 size={22} strokeWidth={1.2} />}</span><span className="now-playing-text"><strong>{track?.title || 'Elige lo que quieres escuchar'}</strong><small>{track?.artist || 'Tu biblioteca local'}</small></span>{onFavorite && <button className={`player-heart ${track?.favorite ? 'liked' : ''}`} onClick={onFavorite} aria-label="Marcar como favorito"><Heart size={16} fill={track?.favorite ? 'currentColor' : 'none'} /></button>}</div><div className="player-center"><div className="transport-controls"><button className={`transport-subtle mode-button ${playMode.shuffle ? 'active' : ''}`} onClick={onShuffle} aria-pressed={playMode.shuffle} aria-label="Aleatorio" title="Aleatorio (S)"><Shuffle size={17} /></button><button className="transport-subtle" onClick={onPrevious} aria-label="Canción anterior" title="Anterior (Ctrl+←)"><SkipBack size={19} fill="currentColor" /></button><button className="play-button" onClick={onToggle} aria-label={playback.isPlaying ? 'Pausar' : 'Reproducir'} title={`${playback.isPlaying ? 'Pausar' : 'Reproducir'} (Espacio)`}>{playback.isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="play-icon" />}</button><button className="transport-subtle" onClick={onNext} aria-label="Siguiente canción" title="Siguiente (Ctrl+→)"><SkipForward size={19} fill="currentColor" /></button><button className={`transport-subtle mode-button ${playMode.repeat !== 'off' ? 'active' : ''}`} onClick={onRepeat} aria-label={repeatLabel} title={`${repeatLabel} (R)`}>{playMode.repeat === 'one' ? <Repeat1 size={17} /> : <Repeat size={17} />}</button></div><SeekBar positionMs={playback.positionMs} durationMs={playback.durationMs} disabled={!playback.path} onSeek={onSeek} /></div><div className="player-tools"><button className={`tool-button ${lyricsOpen ? 'active' : ''}`} onClick={onLyrics} aria-pressed={lyricsOpen} aria-label="Letra" title="Letra (L)"><MicVocal size={17} /></button><button className={`tool-button ${panelOpen ? 'active' : ''}`} onClick={onTogglePanel} aria-pressed={panelOpen} aria-label="Reproduciendo y cola" title="Reproduciendo y cola"><PanelRight size={17} /></button><button className={`tool-button mode-button eq-toggle ${playback.equalizerOn ? 'active' : ''}`} onClick={onEqualizer} aria-expanded={eqOpen} aria-label={playback.equalizerOn ? 'Ecualizador, activado' : 'Ecualizador'} title="Ecualizador (E)"><SlidersHorizontal size={17} /></button><Volume2 size={17} className="volume-icon" /><input aria-label="Volumen" className="volume-range" type="range" min={0} max={100} value={playback.volume} onChange={(event) => onVolume(Number(event.target.value))} style={{ accentColor: 'var(--accent)' }} /><span className={`player-output-dot ${playback.outputReady ? 'ready' : ''}`} title={playback.outputReady ? `Audio ${playback.outputMode}` : 'Sin salida de audio'} /></div></footer>
+  const tint = useCoverColor(track?.coverUrl)
+  // The volume to go back to when the sound is turned on again.
+  const unmuted = useRef(playback.volume > 0 ? playback.volume : 60)
+  if (playback.volume > 0) unmuted.current = playback.volume
+  const VolumeIcon = playback.volume === 0 ? VolumeX : playback.volume < 50 ? Volume1 : Volume2
+  return <footer className={`player-bar ${playback.isPlaying ? 'is-playing' : ''}`} style={tint ? { '--tint': tint } as CSSProperties : undefined}>
+    <span className="player-glow" aria-hidden="true" />
+    <div className="now-playing">
+      <button className="player-cover" style={coverStyle(track, 0)} onClick={onTogglePanel} aria-label="Ver lo que suena y lo que sigue" title="Reproduciendo y cola">{track?.coverUrl ? null : <Disc3 size={24} strokeWidth={1.2} />}</button>
+      <span className="now-playing-text">
+        <strong title={track?.title}>{track?.title || 'Elige lo que quieres escuchar'}</strong>
+        {track ? <span className="now-playing-meta">
+          <button className="meta-link" onClick={() => onArtist(track)} title={`Ver ${track.artist}`}>{track.artist}</button>
+          <span aria-hidden="true">·</span>
+          <button className="meta-link" onClick={() => onAlbum(track)} title={`Ver ${track.album}`}>{track.album}</button>
+        </span> : <small>Pulsa reproducir y empieza tu música</small>}
+      </span>
+      {onFavorite && <button className={`player-heart ${track?.favorite ? 'liked' : ''}`} onClick={onFavorite} aria-label={track?.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'} title={track?.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}><Heart size={17} fill={track?.favorite ? 'currentColor' : 'none'} /></button>}
+    </div>
+    <div className="player-center">
+      <div className="transport-controls">
+        <button className={`transport-subtle mode-button ${playMode.shuffle ? 'active' : ''}`} onClick={onShuffle} aria-pressed={playMode.shuffle} aria-label="Aleatorio" title="Aleatorio (S)"><Shuffle size={17} /></button>
+        <button className="transport-subtle transport-skip" onClick={onPrevious} aria-label="Canción anterior" title="Anterior (Ctrl+←)"><SkipBack size={20} fill="currentColor" /></button>
+        <button className="play-button" onClick={onToggle} aria-label={playback.isPlaying ? 'Pausar' : 'Reproducir'} title={`${playback.isPlaying ? 'Pausar' : 'Reproducir'} (Espacio)`}>{playback.isPlaying ? <Pause size={21} fill="currentColor" /> : <Play size={21} fill="currentColor" className="play-icon" />}</button>
+        <button className="transport-subtle transport-skip" onClick={onNext} aria-label="Siguiente canción" title="Siguiente (Ctrl+→)"><SkipForward size={20} fill="currentColor" /></button>
+        <button className={`transport-subtle mode-button ${playMode.repeat !== 'off' ? 'active' : ''}`} onClick={onRepeat} aria-label={repeatLabel} title={`${repeatLabel} (R)`}>{playMode.repeat === 'one' ? <Repeat1 size={17} /> : <Repeat size={17} />}</button>
+      </div>
+      <SeekBar positionMs={playback.positionMs} durationMs={playback.durationMs} disabled={!playback.path} onSeek={onSeek} />
+    </div>
+    <div className="player-tools">
+      {!playback.outputReady && <span className="output-warning" title="No hay salida de audio: revisa el dispositivo en Ajustes, Sonido" role="status" aria-label="No hay salida de audio"><TriangleAlert size={16} /></span>}
+      <div className="tool-group">
+        <button className={`tool-button ${lyricsOpen ? 'active' : ''}`} onClick={onLyrics} aria-pressed={lyricsOpen} aria-label="Letra" title="Letra (L)"><MicVocal size={17} /></button>
+        <button className={`tool-button ${panelOpen ? 'active' : ''}`} onClick={onTogglePanel} aria-pressed={panelOpen} aria-label="Reproduciendo y cola" title="Reproduciendo y cola"><PanelRight size={17} /></button>
+        <button className={`tool-button mode-button eq-toggle ${playback.equalizerOn ? 'active' : ''}`} onClick={onEqualizer} aria-expanded={eqOpen} aria-label={playback.equalizerOn ? 'Ecualizador, activado' : 'Ecualizador'} title="Ecualizador (E)"><SlidersVertical size={17} /></button>
+      </div>
+      <div className="volume-control">
+        <button className="tool-button" onClick={() => onVolume(playback.volume > 0 ? 0 : unmuted.current)} aria-label={playback.volume > 0 ? 'Silenciar' : 'Activar el sonido'} title={playback.volume > 0 ? 'Silenciar' : 'Activar el sonido'}><VolumeIcon size={18} /></button>
+        <input aria-label="Volumen" className="player-range volume-range" type="range" min={0} max={100} value={playback.volume} onChange={(event) => onVolume(Number(event.target.value))} style={{ '--fill': `${playback.volume}%` } as CSSProperties} />
+      </div>
+    </div>
+  </footer>
 }
 
-// SeekBar follows the pointer while the listener drags and seeks once, when the
-// slider is released: every seek reopens and decodes the file again.
 function SeekBar({ positionMs, durationMs, disabled, onSeek }: { positionMs: number; durationMs: number; disabled: boolean; onSeek: (value: number) => Promise<unknown> }) {
   const input = useRef<HTMLInputElement>(null)
   const [draggedMs, setDraggedMs] = useState<number | null>(null)
@@ -784,7 +945,8 @@ function SeekBar({ positionMs, durationMs, disabled, onSeek }: { positionMs: num
     return () => element.removeEventListener('change', commit)
   }, [])
   const shownMs = draggedMs ?? Math.min(positionMs, durationMs || 1)
-  return <div className="seek-row"><span>{formatTime(shownMs)}</span><input ref={input} aria-label="Posición de la canción" type="range" min={0} max={Math.max(1, durationMs)} value={shownMs} onChange={(event) => setDraggedMs(Number(event.target.value))} style={{ accentColor: 'var(--accent)' }} disabled={disabled} /><span>{formatTime(durationMs)}</span></div>
+  const fill = durationMs > 0 ? Math.min(100, (shownMs / durationMs) * 100) : 0
+  return <div className="seek-row"><span>{formatTime(shownMs)}</span><input ref={input} className="player-range" aria-label="Posición de la canción" aria-valuetext={`${formatTime(shownMs)} de ${formatTime(durationMs)}`} type="range" min={0} max={Math.max(1, durationMs)} value={shownMs} onChange={(event) => setDraggedMs(Number(event.target.value))} style={{ '--fill': `${fill}%` } as CSSProperties} disabled={disabled} /><span>{formatTime(durationMs)}</span></div>
 }
 
 // ScanStatus shows scan progress. It listens on its own, so progress messages

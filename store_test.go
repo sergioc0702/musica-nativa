@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -415,6 +416,47 @@ func TestOpenStoreUpgradesImagesSavedByEarlierVersions(t *testing.T) {
 	}
 	if len(tracks) != 1 || tracks[0].CoverURL == "" {
 		t.Fatalf("cover not restored after upgrade: %+v", tracks)
+	}
+}
+
+func TestPlaylistsShowTheCoversOfTheirFirstSongs(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	var tracks []library.Track
+	for i, cover := range []string{"c1", "", "c2", "c1", "c3", "c4", "c5"} {
+		tracks = append(tracks, library.Track{ID: "t" + strconv.Itoa(i), Path: "t" + strconv.Itoa(i) + ".mp3", Title: "T", Artist: "A", Album: "B", AlbumArtist: "A", Format: "MP3", CoverID: cover})
+	}
+	if err := store.UpsertTracks(ctx, tracks); err != nil {
+		t.Fatal(err)
+	}
+	playlist, err := store.CreatePlaylist(ctx, "Mezcla")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, track := range tracks {
+		if err := store.AddTrackToPlaylist(ctx, playlist.ID, track.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.CreatePlaylist(ctx, "Vacía"); err != nil {
+		t.Fatal(err)
+	}
+
+	playlists, err := store.Playlists(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	covers := map[string][]string{}
+	for _, item := range playlists {
+		covers[item.Name] = item.Covers
+	}
+	want := []string{artworkURL("c1"), artworkURL("c2"), artworkURL("c3"), artworkURL("c4")}
+	if !reflect.DeepEqual(covers["Mezcla"], want) {
+		t.Fatalf("covers = %v; want the first four different ones in playlist order", covers["Mezcla"])
+	}
+	if covers["Vacía"] == nil || len(covers["Vacía"]) != 0 {
+		t.Fatalf("covers of an empty playlist = %#v; want an empty list", covers["Vacía"])
 	}
 }
 

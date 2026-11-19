@@ -34,6 +34,9 @@ type Playlist struct {
 	Name       string `json:"name"`
 	TrackCount int    `json:"trackCount"`
 	CreatedAt  int64  `json:"createdAt"`
+	// Covers are the pictures of its first songs (up to four different ones),
+	// for the playlist's mosaic.
+	Covers []string `json:"covers"`
 }
 
 // Store keeps the catalog in SQLite. It uses a single connection, so a query's
@@ -94,6 +97,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			background_image_id TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		// One row per listen, for the home page's history.
+		`CREATE TABLE IF NOT EXISTS plays (track_id TEXT NOT NULL, played_unix INTEGER NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS plays_track_idx ON plays(track_id, played_unix)`,
 		// Lyrics added in the app ("manual") and what LRCLIB answered: its
 		// lyrics ("lrclib") or that it had none ("none"), so it is not asked again.
 		`CREATE TABLE IF NOT EXISTS lyrics (
@@ -608,7 +614,21 @@ func (s *Store) Playlists(ctx context.Context) ([]Playlist, error) {
 		}
 		result = append(result, playlist)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range result {
+		covers, err := s.stringColumn(ctx, `SELECT t.cover_id FROM playlist_tracks pt JOIN tracks t ON t.id=pt.track_id
+			WHERE pt.playlist_id=? AND t.cover_id<>'' GROUP BY t.cover_id ORDER BY MIN(pt.position) LIMIT 4`, result[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		result[i].Covers = make([]string, 0, len(covers))
+		for _, cover := range covers {
+			result[i].Covers = append(result[i].Covers, artworkURL(cover))
+		}
+	}
+	return result, nil
 }
 
 func (s *Store) AddTrackToPlaylist(ctx context.Context, playlistID, trackID string) error {

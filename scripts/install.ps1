@@ -56,7 +56,7 @@ $uninstallShortcut.Save()
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MusicaNativa'
 New-Item -Path $uninstallKey -Force | Out-Null
 Set-ItemProperty -Path $uninstallKey -Name DisplayName -Value 'Música Nativa'
-Set-ItemProperty -Path $uninstallKey -Name DisplayVersion -Value '1.0.3'
+Set-ItemProperty -Path $uninstallKey -Name DisplayVersion -Value '1.0.4'
 Set-ItemProperty -Path $uninstallKey -Name Publisher -Value 'Música Nativa'
 Set-ItemProperty -Path $uninstallKey -Name DisplayIcon -Value $appPath
 Set-ItemProperty -Path $uninstallKey -Name UninstallString -Value "`"$(Join-Path $PSHOME 'powershell.exe')`" -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""

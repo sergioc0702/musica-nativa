@@ -28,6 +28,7 @@ func main() {
 	application.RegisterEvent[ScanProgress]("library:scan-progress")
 	application.RegisterEvent[PlaybackState]("player:state")
 	application.RegisterEvent[AudioDevicesChanged]("audio:devices")
+	application.RegisterEvent[ListeningHistory]("history:changed")
 	app := application.New(application.Options{
 		Name:        "Música Nativa",
 		Description: "Tu colección de música, en casa.",

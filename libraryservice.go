@@ -70,8 +70,11 @@ type LibraryService struct {
 	queue     *playQueue
 	updateMu  sync.Mutex
 	// lrclib finds lyrics on lrclib.net when the song brings none.
-	lrclib  *lrclibClient
-	updates updateSource
+	lrclib *lrclibClient
+	// plays counts listened songs; resumeSaved is when the resume point was last saved.
+	plays       playCounter
+	resumeSaved time.Time
+	updates     updateSource
 }
 
 func NewLibraryService(store *Store, player *AudioPlayer) *LibraryService {
@@ -718,6 +721,7 @@ func (s *LibraryService) playbackEvents(ctx context.Context) {
 			if s.player.State().IsPlaying {
 				s.emitPlayback()
 			}
+			s.trackListening()
 		case <-deviceTicker.C:
 			devices := s.player.Devices()
 			signature := audioDeviceSignature(devices)
