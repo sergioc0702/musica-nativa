@@ -6,13 +6,23 @@ import type { PlaybackState } from '../bindings/musica-nativa/models'
 // it re-render, instead of the whole library view.
 let current: PlaybackState = {
   path: '', isPlaying: false, positionMs: 0, durationMs: 0, volume: 72, outputMode: 'shared',
-  deviceID: '', outputReady: false, equalizerOn: false, equalizer: [0, 0, 0],
+  deviceID: '', outputReady: false, equalizerOn: false, equalizer: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 }
+let receivedAt = 0
 const listeners = new Set<() => void>()
 
 export function setPlayback(next: PlaybackState) {
   current = next
+  receivedAt = performance.now()
   listeners.forEach((listener) => listener())
+}
+
+// positionNow estimates where the song is right now, between the reports,
+// so the lyrics can move every frame.
+export function positionNow(): number {
+  if (!current.isPlaying) return current.positionMs
+  const position = current.positionMs + (performance.now() - receivedAt)
+  return current.durationMs > 0 ? Math.min(position, current.durationMs) : position
 }
 
 export function getPlayback() {

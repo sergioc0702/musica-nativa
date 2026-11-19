@@ -418,6 +418,70 @@ func TestOpenStoreUpgradesImagesSavedByEarlierVersions(t *testing.T) {
 	}
 }
 
+func TestStoreKeepsDiscNumbers(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	saved := library.Track{ID: "doble", Path: filepath.Join(t.TempDir(), "doble.mp3"), Title: "Doble", Artist: "A", Album: "B",
+		AlbumArtist: "A", Format: "MP3", TrackNumber: 4, DiscNumber: 2}
+	if err := store.UpsertTracks(ctx, []library.Track{saved}); err != nil {
+		t.Fatal(err)
+	}
+
+	track, err := store.Track(ctx, "doble")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if track.TrackNumber != 4 || track.DiscNumber != 2 {
+		t.Fatalf("stored track %d on disc %d; want track 4 on disc 2", track.TrackNumber, track.DiscNumber)
+	}
+}
+
+func TestOpenStoreRereadsTracksSavedWithoutDiscNumbers(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "library.db")
+	createLegacyDatabase(t, dbPath,
+		`INSERT INTO tracks(id,path,title,artist,album,album_artist,format,size_bytes,modified_unix,available)
+			VALUES ('vieja','vieja.mp3','Vieja','A','B','A','MP3',10,1700000000,1)`)
+	ctx := context.Background()
+
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			store.Close()
+		}
+	})
+	old, err := store.Track(ctx, "vieja")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.ModifiedUnix != 0 {
+		t.Fatalf("modified time after upgrade = %d; want 0 so the next scan reads the disc number", old.ModifiedUnix)
+	}
+
+	// Once upgraded, opening the library again keeps what the scan saved.
+	old.ModifiedUnix, old.DiscNumber = 1700000000, 1
+	if err := store.UpsertTracks(ctx, []library.Track{old}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	closed = true
+	reopened, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	again, err := reopened.Track(ctx, "vieja")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ModifiedUnix != 1700000000 || again.DiscNumber != 1 {
+		t.Fatalf("after reopening: modified %d, disc %d; want 1700000000 and 1", again.ModifiedUnix, again.DiscNumber)
+	}
+}
+
 func trackIDs(tracks []library.Track) string {
 	ids := make([]string, 0, len(tracks))
 	for _, track := range tracks {

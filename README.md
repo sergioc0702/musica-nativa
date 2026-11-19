@@ -6,11 +6,13 @@ Reproductor de escritorio para escuchar música guardada en tu PC. Incluye bibli
 
 - Lee archivos **MP3, WAV y FLAC** de las carpetas que elijas; no copia ni modifica las canciones.
 - Lee etiquetas y portadas cuando están disponibles y muestra valores de reemplazo cuando faltan.
-- Organiza canciones, álbumes y artistas; permite buscar, crear playlists, marcar favoritos y administrar la cola.
+- Organiza canciones, álbumes y artistas; permite buscar, crear playlists, marcar favoritos y administrar la cola. Los álbumes suenan en el orden del disco.
+- Reproduce en orden o en aleatorio, y puede repetir la cola o una canción. Tiene atajos de teclado (lista en Ajustes).
 - Recuerda las carpetas y actualiza la biblioteca al abrir la app.
 - Incluye tres temas y un editor para guardar colores e imagen de fondo.
 - Usa salida WASAPI compartida de forma predeterminada. El modo exclusivo es opcional y puede volver a compartido si el dispositivo no lo admite.
-- Incluye un ecualizador de tres bandas opcional, apagado de forma predeterminada.
+- Muestra la letra de la canción, sincronizada letra por letra cuando tiene tiempos. La toma de un `.lrc` junto a la canción, de las etiquetas del archivo o de [LRCLIB](https://lrclib.net) (se puede apagar en Ajustes), y también puedes añadirla a mano. Se abre con el botón de la barra del reproductor o con la tecla L.
+- Incluye un ecualizador de 10 bandas con preajustes, que se oye al instante. Se abre desde la barra del reproductor o con la tecla E, y está apagado de forma predeterminada.
 
 ## Instalar en Windows
 

@@ -22,4 +22,6 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src", "bindings"],
+  // Tests run in Node (npm test); no Node type package is installed here.
+  "exclude": ["src/**/*.test.ts"],
 }

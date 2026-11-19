@@ -7,7 +7,7 @@ info:
   description: "Reproductor de música local para Windows"
   copyright: "© 2026 Música Nativa"
   comments: "Tu colección local, con temas a tu manera."
-  version: "1.0.2"
+  version: "1.0.3"
 
 dev_mode:
   root_path: .

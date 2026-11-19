@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,7 +68,8 @@ func (s *Store) migrate(ctx context.Context) error {
 			id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
 			artist TEXT NOT NULL, album TEXT NOT NULL, album_artist TEXT NOT NULL,
 			genre TEXT NOT NULL DEFAULT '', year INTEGER NOT NULL DEFAULT 0,
-			track_number INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER NOT NULL DEFAULT 0,
+			track_number INTEGER NOT NULL DEFAULT 0, disc_number INTEGER NOT NULL DEFAULT 0,
+			duration_seconds INTEGER NOT NULL DEFAULT 0,
 			format TEXT NOT NULL, size_bytes INTEGER NOT NULL DEFAULT 0, modified_unix INTEGER NOT NULL DEFAULT 0,
 			cover_data_url TEXT NOT NULL DEFAULT '', available INTEGER NOT NULL DEFAULT 1,
 			favorite INTEGER NOT NULL DEFAULT 0, cover_id TEXT NOT NULL DEFAULT ''
@@ -92,11 +94,17 @@ func (s *Store) migrate(ctx context.Context) error {
 			background_image_id TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		// Lyrics added in the app ("manual") and what LRCLIB answered: its
+		// lyrics ("lrclib") or that it had none ("none"), so it is not asked again.
+		`CREATE TABLE IF NOT EXISTS lyrics (
+			track_id TEXT PRIMARY KEY, source TEXT NOT NULL, text TEXT NOT NULL DEFAULT '',
+			instrumental INTEGER NOT NULL DEFAULT 0, checked_unix INTEGER NOT NULL DEFAULT 0
+		)`,
 		`INSERT OR IGNORE INTO preferences(key, value) VALUES ('activeTheme', 'nocturno')`,
 		`INSERT OR IGNORE INTO preferences(key, value) VALUES ('volume', '72')`,
 		`INSERT OR IGNORE INTO preferences(key, value) VALUES ('outputMode', 'shared')`,
 		`INSERT OR IGNORE INTO preferences(key, value) VALUES ('equalizerEnabled', 'false')`,
-		`INSERT OR IGNORE INTO preferences(key, value) VALUES ('equalizerBands', '[0,0,0]')`,
+		`INSERT OR IGNORE INTO preferences(key, value) VALUES ('equalizerBands', '[0,0,0,0,0,0,0,0,0,0]')`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
@@ -104,11 +112,22 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	// Databases created by version 1.0.0 lack the picture references.
-	if err := s.ensureColumn(ctx, "tracks", "cover_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if _, err := s.ensureColumn(ctx, "tracks", "cover_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
-	if err := s.ensureColumn(ctx, "themes", "background_image_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
+	if _, err := s.ensureColumn(ctx, "themes", "background_image_id", `TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
+	}
+	// Versions before 1.0.3 did not keep disc numbers. Forgetting the
+	// modification times makes the next scan read every file's tags again.
+	addedDiscs, err := s.ensureColumn(ctx, "tracks", "disc_number", `INTEGER NOT NULL DEFAULT 0`)
+	if err != nil {
+		return err
+	}
+	if addedDiscs {
+		if _, err := s.db.ExecContext(ctx, `UPDATE tracks SET modified_unix=0`); err != nil {
+			return fmt.Errorf("database migration: %w", err)
+		}
 	}
 	for _, theme := range builtInThemes() {
 		if err := s.saveBuiltInTheme(ctx, theme); err != nil {
@@ -118,30 +137,31 @@ func (s *Store) migrate(ctx context.Context) error {
 	return s.moveInlineImages(ctx)
 }
 
-func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+// ensureColumn adds column to table when it is missing and says whether it did.
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
-		return err
+		return false, err
 	}
 	found := false
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			rows.Close()
-			return err
+			return false, err
 		}
 		found = found || name == column
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return false, err
 	}
 	if found {
-		return nil
+		return false, nil
 	}
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition); err != nil {
-		return fmt.Errorf("database migration: %w", err)
+		return false, fmt.Errorf("database migration: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // moveInlineImages takes the pictures that version 1.0.0 stored as data URLs
@@ -374,14 +394,14 @@ func (s *Store) UpsertTracks(ctx context.Context, tracks []library.Track) error 
 	if err != nil {
 		return err
 	}
-	statement := `INSERT INTO tracks(id,path,title,artist,album,album_artist,genre,year,track_number,duration_seconds,format,size_bytes,modified_unix,cover_id,available)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,
+	statement := `INSERT INTO tracks(id,path,title,artist,album,album_artist,genre,year,track_number,disc_number,duration_seconds,format,size_bytes,modified_unix,cover_id,available)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,
 		artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,genre=excluded.genre,year=excluded.year,
-		track_number=excluded.track_number,duration_seconds=excluded.duration_seconds,format=excluded.format,size_bytes=excluded.size_bytes,
+		track_number=excluded.track_number,disc_number=excluded.disc_number,duration_seconds=excluded.duration_seconds,format=excluded.format,size_bytes=excluded.size_bytes,
 		modified_unix=excluded.modified_unix,cover_id=excluded.cover_id,available=1`
 	for _, track := range tracks {
 		_, err := tx.ExecContext(ctx, statement, track.ID, track.Path, track.Title, track.Artist, track.Album, track.AlbumArtist,
-			track.Genre, track.Year, track.TrackNumber, track.DurationSeconds, track.Format, track.SizeBytes, track.ModifiedUnix,
+			track.Genre, track.Year, track.TrackNumber, track.DiscNumber, track.DurationSeconds, track.Format, track.SizeBytes, track.ModifiedUnix,
 			track.CoverID)
 		if err != nil {
 			tx.Rollback()
@@ -391,7 +411,7 @@ func (s *Store) UpsertTracks(ctx context.Context, tracks []library.Track) error 
 	return tx.Commit()
 }
 
-const trackColumns = `id,path,title,artist,album,album_artist,genre,year,track_number,duration_seconds,format,size_bytes,modified_unix,cover_id,available,favorite`
+const trackColumns = `id,path,title,artist,album,album_artist,genre,year,track_number,disc_number,duration_seconds,format,size_bytes,modified_unix,cover_id,available,favorite`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -399,7 +419,7 @@ func scanTrack(row rowScanner) (library.Track, error) {
 	var track library.Track
 	var available, favorite int
 	err := row.Scan(&track.ID, &track.Path, &track.Title, &track.Artist, &track.Album, &track.AlbumArtist, &track.Genre,
-		&track.Year, &track.TrackNumber, &track.DurationSeconds, &track.Format, &track.SizeBytes, &track.ModifiedUnix,
+		&track.Year, &track.TrackNumber, &track.DiscNumber, &track.DurationSeconds, &track.Format, &track.SizeBytes, &track.ModifiedUnix,
 		&track.CoverID, &available, &favorite)
 	track.Available = available == 1
 	track.Favorite = favorite == 1
@@ -639,4 +659,52 @@ func (s *Store) MarkMissingUnderRoots(ctx context.Context, roots []string, prese
 func (s *Store) DeletePlaylist(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM playlists WHERE id=?`, id)
 	return err
+}
+
+// storedLyrics is a row of the lyrics table.
+type storedLyrics struct {
+	Source       string
+	Text         string
+	Instrumental bool
+	Checked      time.Time
+}
+
+// StoredLyrics returns the lyrics kept for a track, if any.
+func (s *Store) StoredLyrics(ctx context.Context, trackID string) (storedLyrics, bool, error) {
+	var stored storedLyrics
+	var instrumental int
+	var checked int64
+	err := s.db.QueryRowContext(ctx, `SELECT source,text,instrumental,checked_unix FROM lyrics WHERE track_id=?`, trackID).
+		Scan(&stored.Source, &stored.Text, &instrumental, &checked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return storedLyrics{}, false, nil
+	}
+	if err != nil {
+		return storedLyrics{}, false, err
+	}
+	stored.Instrumental, stored.Checked = instrumental == 1, time.Unix(checked, 0)
+	return stored, true, nil
+}
+
+// SaveStoredLyrics keeps lyrics for a track, replacing what was kept before.
+func (s *Store) SaveStoredLyrics(ctx context.Context, trackID string, stored storedLyrics) error {
+	instrumental := 0
+	if stored.Instrumental {
+		instrumental = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO lyrics(track_id,source,text,instrumental,checked_unix) VALUES(?,?,?,?,?)
+		ON CONFLICT(track_id) DO UPDATE SET source=excluded.source,text=excluded.text,
+		instrumental=excluded.instrumental,checked_unix=excluded.checked_unix`,
+		trackID, stored.Source, stored.Text, instrumental, stored.Checked.Unix())
+	return err
+}
+
+// DeleteStoredLyrics forgets the lyrics kept for a track from source.
+func (s *Store) DeleteStoredLyrics(ctx context.Context, trackID string, sources ...string) error {
+	for _, source := range sources {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM lyrics WHERE track_id=? AND source=?`, trackID, source); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -67,14 +67,15 @@ type LibraryService struct {
 	scanStop  context.CancelFunc
 	closing   bool
 	scans     sync.WaitGroup
-	queue     []string
-	queueAt   int
+	queue     *playQueue
 	updateMu  sync.Mutex
-	updates   updateSource
+	// lrclib finds lyrics on lrclib.net when the song brings none.
+	lrclib  *lrclibClient
+	updates updateSource
 }
 
 func NewLibraryService(store *Store, player *AudioPlayer) *LibraryService {
-	return &LibraryService{store: store, player: player, scanLibrary: library.ScanRoots}
+	return &LibraryService{store: store, player: player, scanLibrary: library.ScanRoots, queue: newPlayQueue(), lrclib: newLRCLIBClient(lrclibURL)}
 }
 
 func (s *LibraryService) ServiceName() string { return "LibraryService" }
@@ -86,13 +87,7 @@ func (s *LibraryService) ServiceStartup(ctx context.Context, _ application.Servi
 			s.player.SetVolume(value)
 		}
 	}
-	if bandsRaw, err := s.store.Preference(ctx, "equalizerBands", "[0,0,0]"); err == nil {
-		var bands []float64
-		if json.Unmarshal([]byte(bandsRaw), &bands) == nil {
-			enabledRaw, _ := s.store.Preference(ctx, "equalizerEnabled", "false")
-			s.player.SetEqualizer(enabledRaw == "true", bands)
-		}
-	}
+	s.loadEqualizer(ctx)
 	mode, _ := s.store.Preference(ctx, "outputMode", "shared")
 	deviceID, _ := s.store.Preference(ctx, "outputDevice", "")
 	if mode != "shared" || deviceID != "" {
@@ -104,6 +99,7 @@ func (s *LibraryService) ServiceStartup(ctx context.Context, _ application.Servi
 			_ = s.store.SetPreference(ctx, "outputDevice", actualDevice)
 		}
 	}
+	s.loadPlayMode(ctx)
 	folders, err := s.store.Folders(ctx)
 	if err != nil {
 		return err
@@ -418,11 +414,7 @@ func (s *LibraryService) ToggleFavorite(trackID string) error {
 
 func (s *LibraryService) SetQueue(trackIDs []string, startAt int) {
 	s.mu.Lock()
-	s.queue = append([]string(nil), trackIDs...)
-	if startAt < 0 || startAt >= len(s.queue) {
-		startAt = 0
-	}
-	s.queueAt = startAt
+	s.queue.set(trackIDs, startAt)
 	s.mu.Unlock()
 }
 
@@ -431,14 +423,14 @@ func (s *LibraryService) AddToQueue(trackID string) error {
 		return err
 	}
 	s.mu.Lock()
-	s.queue = append(s.queue, trackID)
+	s.queue.add(trackID)
 	s.mu.Unlock()
 	return nil
 }
 
 func (s *LibraryService) Queue() ([]library.Track, error) {
 	s.mu.Lock()
-	ids := append([]string(nil), s.queue...)
+	ids := append([]string(nil), s.queue.ids...)
 	s.mu.Unlock()
 	return s.store.TracksByIDs(context.Background(), ids)
 }
@@ -452,7 +444,7 @@ func (s *LibraryService) PlayTrack(trackID string) error {
 		return fmt.Errorf("no se encuentra el archivo: %s", track.Path)
 	}
 	s.mu.Lock()
-	queued := queueIndex(s.queue, trackID) >= 0
+	queued := s.queue.index(trackID) >= 0
 	s.mu.Unlock()
 	if !queued {
 		// Without a queue from the interface, play through the whole library.
@@ -464,12 +456,12 @@ func (s *LibraryService) PlayTrack(trackID string) error {
 			}
 		}
 		s.mu.Lock()
-		s.queue = ids
+		s.queue.set(ids, queueIndex(ids, trackID))
 		s.mu.Unlock()
 	}
 	s.mu.Lock()
-	if index := queueIndex(s.queue, trackID); index >= 0 {
-		s.queueAt = index
+	if index := s.queue.index(trackID); index >= 0 {
+		s.queue.at = index
 	}
 	s.mu.Unlock()
 	if err := s.player.Play(track.Path, 0); err != nil {
@@ -494,7 +486,7 @@ func (s *LibraryService) TogglePlayback() PlaybackState {
 	return s.player.State()
 }
 
-func (s *LibraryService) NextTrack() error { return s.stepQueue(1) }
+func (s *LibraryService) NextTrack() error { return s.stepQueue(1, false) }
 
 func (s *LibraryService) PreviousTrack() error {
 	state := s.player.State()
@@ -503,19 +495,24 @@ func (s *LibraryService) PreviousTrack() error {
 		s.emitPlayback()
 		return nil
 	}
-	return s.stepQueue(-1)
+	return s.stepQueue(-1, false)
 }
 
-func (s *LibraryService) stepQueue(direction int) error {
+// stepQueue plays the next playable song in direction (1 or -1). ended means
+// the song finished on its own, which is when repeat-one plays it again.
+func (s *LibraryService) stepQueue(direction int, ended bool) error {
 	s.mu.Lock()
-	if len(s.queue) == 0 {
+	if len(s.queue.ids) == 0 {
 		s.mu.Unlock()
 		return fmt.Errorf("la cola está vacía")
 	}
-	start := s.queueAt
-	for nextAt := s.queueAt + direction; nextAt >= 0 && nextAt < len(s.queue); nextAt += direction {
-		s.queueAt = nextAt
-		id := s.queue[nextAt]
+	start := s.queue.at
+	for _, index := range s.queue.order(direction, ended) {
+		if index >= len(s.queue.ids) {
+			break // the queue was replaced while a song was starting
+		}
+		s.queue.at = index
+		id := s.queue.ids[index]
 		s.mu.Unlock()
 		err := s.playTrackWithoutQueueChange(id)
 		if err == nil {
@@ -523,9 +520,54 @@ func (s *LibraryService) stepQueue(direction int) error {
 		}
 		s.mu.Lock()
 	}
-	s.queueAt = start
+	if start < len(s.queue.ids) {
+		s.queue.at = start
+	}
 	s.mu.Unlock()
 	return fmt.Errorf("no hay otra canción disponible en esta dirección de la cola")
+}
+
+// PlayMode says whether the queue is shuffled and how it repeats.
+func (s *LibraryService) PlayMode() PlayMode {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.queue.mode
+}
+
+// SetShuffle mixes the songs after the current one, or puts them back in
+// the order they were chosen in.
+func (s *LibraryService) SetShuffle(on bool) PlayMode {
+	s.mu.Lock()
+	s.queue.setShuffle(on)
+	mode := s.queue.mode
+	s.mu.Unlock()
+	_ = s.store.SetPreference(context.Background(), "shuffle", fmt.Sprint(on))
+	return mode
+}
+
+// SetRepeat sets the repeat mode: "off", "all" or "one".
+func (s *LibraryService) SetRepeat(repeat string) (PlayMode, error) {
+	if repeat != RepeatOff && repeat != RepeatAll && repeat != RepeatOne {
+		return s.PlayMode(), fmt.Errorf("modo de repetición desconocido: %q", repeat)
+	}
+	s.mu.Lock()
+	s.queue.mode.Repeat = repeat
+	mode := s.queue.mode
+	s.mu.Unlock()
+	_ = s.store.SetPreference(context.Background(), "repeat", repeat)
+	return mode, nil
+}
+
+// loadPlayMode restores shuffle and repeat from the last session.
+func (s *LibraryService) loadPlayMode(ctx context.Context) {
+	shuffle, _ := s.store.Preference(ctx, "shuffle", "false")
+	repeat, _ := s.store.Preference(ctx, "repeat", RepeatOff)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queue.setShuffle(shuffle == "true")
+	if repeat == RepeatAll || repeat == RepeatOne {
+		s.queue.mode.Repeat = repeat
+	}
 }
 
 func (s *LibraryService) playTrackWithoutQueueChange(id string) error {
@@ -558,25 +600,58 @@ func (s *LibraryService) SetVolume(value int) PlaybackState {
 	return s.player.State()
 }
 
-// SetAudioOptions applies the output mode, output device and equalizer. A new
+// SetAudioOptions applies the output mode and output device. A new
 // mode and device are opened together; the player explains any fallback in
 // the returned state's Error.
-func (s *LibraryService) SetAudioOptions(mode, deviceID string, equalizerEnabled bool, bands []float64) PlaybackState {
+func (s *LibraryService) SetAudioOptions(mode, deviceID string) PlaybackState {
 	before := s.player.State()
 	if mode != before.OutputMode || deviceID != before.DeviceID {
 		_, _, _ = s.player.SetOutput(mode, deviceID)
 	}
-	s.player.SetEqualizer(equalizerEnabled, bands)
 	after := s.player.State()
 	ctx := context.Background()
 	_ = s.store.SetPreference(ctx, "outputMode", after.OutputMode)
 	_ = s.store.SetPreference(ctx, "outputDevice", after.DeviceID)
-	_ = s.store.SetPreference(ctx, "equalizerEnabled", fmt.Sprint(equalizerEnabled))
-	if encoded, encodeErr := json.Marshal(bands); encodeErr == nil {
-		_ = s.store.SetPreference(ctx, "equalizerBands", string(encoded))
-	}
 	s.emitPlayback()
 	return after
+}
+
+// SetEqualizer turns the equalizer on or off and sets its ten bands (dB).
+// The interface calls it while a slider moves, and the change is heard at once.
+func (s *LibraryService) SetEqualizer(enabled bool, bands []float64) PlaybackState {
+	s.player.SetEqualizer(enabled, bands)
+	state := s.player.State()
+	s.saveEqualizer(context.Background(), state.EqualizerOn, state.Equalizer)
+	s.emitPlayback()
+	return state
+}
+
+func (s *LibraryService) saveEqualizer(ctx context.Context, enabled bool, bands []float64) {
+	_ = s.store.SetPreference(ctx, "equalizerEnabled", fmt.Sprint(enabled))
+	if encoded, err := json.Marshal(bands); err == nil {
+		_ = s.store.SetPreference(ctx, "equalizerBands", string(encoded))
+	}
+}
+
+// loadEqualizer restores the equalizer of the last session. Versions up to
+// 1.0.2 saved three bands; those become the ten bands with the same curve.
+func (s *LibraryService) loadEqualizer(ctx context.Context) {
+	raw, _ := s.store.Preference(ctx, "equalizerBands", "[]")
+	enabledRaw, _ := s.store.Preference(ctx, "equalizerEnabled", "false")
+	var bands []float64
+	if json.Unmarshal([]byte(raw), &bands) != nil {
+		bands = nil
+	}
+	upgraded := len(bands) == 3
+	if upgraded {
+		converted := legacyEqualizerBands([3]float64{bands[0], bands[1], bands[2]})
+		bands = converted[:]
+	}
+	s.player.SetEqualizer(enabledRaw == "true", bands)
+	if upgraded {
+		state := s.player.State()
+		s.saveEqualizer(ctx, state.EqualizerOn, state.Equalizer)
+	}
 }
 
 func (s *LibraryService) SaveTheme(theme Theme) (ThemeSaveResult, error) {
@@ -636,7 +711,7 @@ func (s *LibraryService) playbackEvents(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if s.player.TakeEnded() {
-				if err := s.stepQueue(1); err != nil {
+				if err := s.stepQueue(1, true); err != nil {
 					s.emitPlayback()
 				}
 			}

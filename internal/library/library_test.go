@@ -155,6 +155,38 @@ func TestScanRootsReusesKnownTrackUntilFileChanges(t *testing.T) {
 	}
 }
 
+func TestScanRootsReadsTrackAndDiscNumbers(t *testing.T) {
+	root := t.TempDir()
+	frames := textFrame("TIT2", "Segunda parte")
+	frames = append(frames, textFrame("TRCK", "3/12")...)
+	frames = append(frames, textFrame("TPOS", "2/2")...)
+	writeID3File(t, filepath.Join(root, "song.mp3"), frames)
+
+	tracks, issues := ScanRoots(context.Background(), []string{root}, ScanOptions{})
+	if len(issues) != 0 {
+		t.Fatalf("ScanRoots returned issues: %v", issues)
+	}
+	if len(tracks) != 1 || tracks[0].TrackNumber != 3 || tracks[0].DiscNumber != 2 {
+		t.Fatalf("tracks = %+v; want track 3 on disc 2", tracks)
+	}
+}
+
+func TestReadLyricsReturnsLyricsStoredInTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "song.mp3")
+	uslt := append([]byte{3}, "spa"...) // UTF-8 text, Spanish
+	uslt = append(uslt, 0)              // empty description
+	uslt = append(uslt, "Primera línea\nSegunda"...)
+	writeID3File(t, path, append(textFrame("TIT2", "Con letra"), id3Frame("USLT", uslt)...))
+
+	if got := ReadLyrics(path); got != "Primera línea\nSegunda" {
+		t.Fatalf("lyrics = %q", got)
+	}
+	writeTaggedMP3(t, path, "Sin letra", nil)
+	if got := ReadLyrics(path); got != "" {
+		t.Fatalf("lyrics of a file without them = %q; want none", got)
+	}
+}
+
 // fakePNG returns bytes that start with the PNG signature, which is all the
 // content sniffing needs to recognise them as an image.
 func fakePNG(body string) []byte {
@@ -172,6 +204,18 @@ func writeTaggedMP3(t *testing.T, path, title string, picture []byte) {
 		apic = append(apic, picture...)
 		frames = append(frames, id3Frame("APIC", apic)...)
 	}
+	writeID3File(t, path, frames)
+}
+
+// textFrame is an ID3v2.3 text frame such as TRCK or TPOS, in ISO-8859-1.
+func textFrame(id, value string) []byte {
+	return id3Frame(id, append([]byte{0}, value...))
+}
+
+// writeID3File writes an ID3v2.3 tag holding frames, followed by bytes that
+// are not valid MPEG audio.
+func writeID3File(t *testing.T, path string, frames []byte) {
+	t.Helper()
 	size := len(frames)
 	data := []byte{'I', 'D', '3', 3, 0, 0, byte(size >> 21 & 0x7f), byte(size >> 14 & 0x7f), byte(size >> 7 & 0x7f), byte(size & 0x7f)}
 	data = append(data, frames...)

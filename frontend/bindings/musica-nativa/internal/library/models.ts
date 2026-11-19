@@ -18,6 +18,7 @@ export class Track {
     "genre": string;
     "year": number;
     "trackNumber": number;
+    "discNumber": number;
     "durationSeconds": number;
     "format": string;
     "sizeBytes": number;
@@ -54,6 +55,9 @@ export class Track {
         }
         if (!("trackNumber" in $$source)) {
             this["trackNumber"] = 0;
+        }
+        if (!("discNumber" in $$source)) {
+            this["discNumber"] = 0;
         }
         if (!("durationSeconds" in $$source)) {
             this["durationSeconds"] = 0;

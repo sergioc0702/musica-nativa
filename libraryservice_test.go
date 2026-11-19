@@ -196,7 +196,7 @@ func TestSetAudioOptionsChangesDeviceAndModeTogether(t *testing.T) {
 	}
 	service := NewLibraryService(store, player)
 
-	state := service.SetAudioOptions("exclusive", "usb-dac", false, []float64{0, 0, 0})
+	state := service.SetAudioOptions("exclusive", "usb-dac")
 	if state.OutputMode != "exclusive" || state.DeviceID != "usb-dac" || !state.OutputReady {
 		t.Fatalf("output = %s on %q (ready %v); want exclusive on usb-dac", state.OutputMode, state.DeviceID, state.OutputReady)
 	}

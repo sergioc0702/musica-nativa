@@ -140,6 +140,161 @@ export class AudioDevicesChanged {
     }
 }
 
+/**
+ * LyricLine is one line of lyrics. In synced lyrics TimeMs is when it is sung;
+ * an empty Text marks an instrumental pause.
+ */
+export class LyricLine {
+    "timeMs": number;
+    "text": string;
+    "words"?: LyricWord[];
+
+    /** Creates a new LyricLine instance. */
+    constructor($$source: Partial<LyricLine> = {}) {
+        if (!("timeMs" in $$source)) {
+            this["timeMs"] = 0;
+        }
+        if (!("text" in $$source)) {
+            this["text"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LyricLine instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LyricLine {
+        const $$createField2_0 = $$createType11;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("words" in $$parsedSource) {
+            $$parsedSource["words"] = $$createField2_0($$parsedSource["words"]);
+        }
+        return new LyricLine($$parsedSource as Partial<LyricLine>);
+    }
+}
+
+/**
+ * LyricWord is a word of a line with its own start time, from enhanced LRC
+ * (<mm:ss.xx> tags inside the line).
+ */
+export class LyricWord {
+    "timeMs": number;
+    "text": string;
+
+    /** Creates a new LyricWord instance. */
+    constructor($$source: Partial<LyricWord> = {}) {
+        if (!("timeMs" in $$source)) {
+            this["timeMs"] = 0;
+        }
+        if (!("text" in $$source)) {
+            this["text"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LyricWord instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LyricWord {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LyricWord($$parsedSource as Partial<LyricWord>);
+    }
+}
+
+/**
+ * Lyrics is what the lyrics view shows for a song.
+ */
+export class Lyrics {
+    "found": boolean;
+
+    /**
+     * Source is where the lyrics came from: "manual" (added in the app),
+     * "lrc" (a .lrc file next to the song), "tags" (inside the song file) or
+     * "lrclib" (downloaded from lrclib.net).
+     */
+    "source": string;
+    "synced": boolean;
+    "instrumental": boolean;
+    "lines": LyricLine[];
+
+    /**
+     * Text is the lyrics as stored, for editing.
+     */
+    "text": string;
+
+    /**
+     * Message explains why nothing was found or what went wrong.
+     */
+    "message"?: string;
+
+    /** Creates a new Lyrics instance. */
+    constructor($$source: Partial<Lyrics> = {}) {
+        if (!("found" in $$source)) {
+            this["found"] = false;
+        }
+        if (!("source" in $$source)) {
+            this["source"] = "";
+        }
+        if (!("synced" in $$source)) {
+            this["synced"] = false;
+        }
+        if (!("instrumental" in $$source)) {
+            this["instrumental"] = false;
+        }
+        if (!("lines" in $$source)) {
+            this["lines"] = [];
+        }
+        if (!("text" in $$source)) {
+            this["text"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new Lyrics instance from a string or object.
+     */
+    static createFrom($$source: any = {}): Lyrics {
+        const $$createField4_0 = $$createType13;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("lines" in $$parsedSource) {
+            $$parsedSource["lines"] = $$createField4_0($$parsedSource["lines"]);
+        }
+        return new Lyrics($$parsedSource as Partial<Lyrics>);
+    }
+}
+
+/**
+ * PlayMode is how the queue goes on: shuffled or in order, and whether it
+ * starts again or repeats the song when it gets to the end.
+ */
+export class PlayMode {
+    "shuffle": boolean;
+    "repeat": string;
+
+    /** Creates a new PlayMode instance. */
+    constructor($$source: Partial<PlayMode> = {}) {
+        if (!("shuffle" in $$source)) {
+            this["shuffle"] = false;
+        }
+        if (!("repeat" in $$source)) {
+            this["repeat"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PlayMode instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PlayMode {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new PlayMode($$parsedSource as Partial<PlayMode>);
+    }
+}
+
 export class PlaybackState {
     "path": string;
     "isPlaying": boolean;
@@ -193,7 +348,7 @@ export class PlaybackState {
      * Creates a new PlaybackState instance from a string or object.
      */
     static createFrom($$source: any = {}): PlaybackState {
-        const $$createField9_0 = $$createType10;
+        const $$createField9_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("equalizer" in $$parsedSource) {
             $$parsedSource["equalizer"] = $$createField9_0($$parsedSource["equalizer"]);
@@ -406,4 +561,8 @@ const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = AudioDevice.createFrom;
 const $$createType8 = $Create.Array($$createType7);
 const $$createType9 = PlaybackState.createFrom;
-const $$createType10 = $Create.Array($Create.Any);
+const $$createType10 = LyricWord.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = LyricLine.createFrom;
+const $$createType13 = $Create.Array($$createType12);
+const $$createType14 = $Create.Array($Create.Any);

@@ -63,8 +63,36 @@ export function GetPlaylistTracks(playlistID: string): $CancellablePromise<libra
     });
 }
 
+/**
+ * Lyrics finds the lyrics of a track. Lyrics added in the app come first,
+ * then the song's own (.lrc next to it, then its tags), then LRCLIB. Lyrics
+ * without times are only used when nothing synced turns up.
+ */
+export function Lyrics(trackID: string): $CancellablePromise<$models.Lyrics> {
+    return $Call.ByID(38745706, trackID).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+/**
+ * LyricsOnline says whether lyrics are looked up on LRCLIB; it is on unless
+ * turned off in Ajustes.
+ */
+export function LyricsOnline(): $CancellablePromise<boolean> {
+    return $Call.ByID(619788041);
+}
+
 export function NextTrack(): $CancellablePromise<void> {
     return $Call.ByID(2724486402);
+}
+
+/**
+ * PlayMode says whether the queue is shuffled and how it repeats.
+ */
+export function PlayMode(): $CancellablePromise<$models.PlayMode> {
+    return $Call.ByID(3730127379).then(($result: any) => {
+        return $$createType7($result);
+    });
 }
 
 export function PlayTrack(trackID: string): $CancellablePromise<void> {
@@ -97,8 +125,27 @@ export function RemoveTrackFromPlaylist(playlistID: string, trackID: string): $C
     return $Call.ByID(970681807, playlistID, trackID);
 }
 
+/**
+ * SaveLyrics keeps lyrics typed or loaded in the app for a track, plain or
+ * LRC. Empty text removes them, and the track's other lyrics come back.
+ */
+export function SaveLyrics(trackID: string, text: string): $CancellablePromise<$models.Lyrics> {
+    return $Call.ByID(1724109263, trackID, text).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
 export function SaveTheme(theme: $models.Theme): $CancellablePromise<$models.ThemeSaveResult> {
     return $Call.ByID(3314450868, theme).then(($result: any) => {
+        return $$createType8($result);
+    });
+}
+
+/**
+ * SearchLyricsAgain forgets what LRCLIB answered before and asks again.
+ */
+export function SearchLyricsAgain(trackID: string): $CancellablePromise<$models.Lyrics> {
+    return $Call.ByID(2933226698, trackID).then(($result: any) => {
         return $$createType6($result);
     });
 }
@@ -115,28 +162,61 @@ export function SearchTracks(query: string): $CancellablePromise<library$0.Track
  */
 export function SeekTo(positionMs: number): $CancellablePromise<$models.PlaybackState> {
     return $Call.ByID(2805307339, positionMs).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType9($result);
     });
 }
 
 /**
- * SetAudioOptions applies the output mode, output device and equalizer. A new
+ * SetAudioOptions applies the output mode and output device. A new
  * mode and device are opened together; the player explains any fallback in
  * the returned state's Error.
  */
-export function SetAudioOptions(mode: string, deviceID: string, equalizerEnabled: boolean, bands: number[]): $CancellablePromise<$models.PlaybackState> {
-    return $Call.ByID(610199086, mode, deviceID, equalizerEnabled, bands).then(($result: any) => {
-        return $$createType7($result);
+export function SetAudioOptions(mode: string, deviceID: string): $CancellablePromise<$models.PlaybackState> {
+    return $Call.ByID(610199086, mode, deviceID).then(($result: any) => {
+        return $$createType9($result);
     });
+}
+
+/**
+ * SetEqualizer turns the equalizer on or off and sets its ten bands (dB).
+ * The interface calls it while a slider moves, and the change is heard at once.
+ */
+export function SetEqualizer(enabled: boolean, bands: number[]): $CancellablePromise<$models.PlaybackState> {
+    return $Call.ByID(3776357154, enabled, bands).then(($result: any) => {
+        return $$createType9($result);
+    });
+}
+
+export function SetLyricsOnline(on: boolean): $CancellablePromise<void> {
+    return $Call.ByID(117517201, on);
 }
 
 export function SetQueue(trackIDs: string[], startAt: number): $CancellablePromise<void> {
     return $Call.ByID(2257732977, trackIDs, startAt);
 }
 
+/**
+ * SetRepeat sets the repeat mode: "off", "all" or "one".
+ */
+export function SetRepeat(repeat: string): $CancellablePromise<$models.PlayMode> {
+    return $Call.ByID(1683618681, repeat).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
+/**
+ * SetShuffle mixes the songs after the current one, or puts them back in
+ * the order they were chosen in.
+ */
+export function SetShuffle(on: boolean): $CancellablePromise<$models.PlayMode> {
+    return $Call.ByID(223705903, on).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
 export function SetVolume(value: number): $CancellablePromise<$models.PlaybackState> {
     return $Call.ByID(2893769448, value).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType9($result);
     });
 }
 
@@ -146,7 +226,7 @@ export function ToggleFavorite(trackID: string): $CancellablePromise<void> {
 
 export function TogglePlayback(): $CancellablePromise<$models.PlaybackState> {
     return $Call.ByID(1738909299).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType9($result);
     });
 }
 
@@ -169,5 +249,7 @@ const $$createType2 = $Create.Array($Create.Any);
 const $$createType3 = $models.Playlist.createFrom;
 const $$createType4 = library$0.Track.createFrom;
 const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $models.ThemeSaveResult.createFrom;
-const $$createType7 = $models.PlaybackState.createFrom;
+const $$createType6 = $models.Lyrics.createFrom;
+const $$createType7 = $models.PlayMode.createFrom;
+const $$createType8 = $models.ThemeSaveResult.createFrom;
+const $$createType9 = $models.PlaybackState.createFrom;

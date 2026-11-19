@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"math/cmplx"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,37 +95,19 @@ func (r *pcmRing) push(generation uint64, samples []float32, frames int) int {
 	return frames
 }
 
-func (r *pcmRing) popIntoFloat32(output []byte, maxFrames int, volume float64) int {
+// popInto moves up to maxFrames frames into dst and returns how many it moved.
+func (r *pcmRing) popInto(dst []float32, maxFrames int) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	frames := maxFrames
-	if frames > r.frames {
-		frames = r.frames
-	}
-	if maxOutputFrames := len(output) / (outputChannels * 4); frames > maxOutputFrames {
-		frames = maxOutputFrames
-	}
-	firstFrames := frames
-	if remaining := r.capacity - r.readAt; firstFrames > remaining {
-		firstFrames = remaining
-	}
-	writeFloatSamples(output, 0, r.data[r.readAt*outputChannels:(r.readAt+firstFrames)*outputChannels], volume)
-	secondFrames := frames - firstFrames
-	if secondFrames > 0 {
-		writeFloatSamples(output, firstFrames, r.data[:secondFrames*outputChannels], volume)
+	frames := min(maxFrames, r.frames, len(dst)/outputChannels)
+	firstFrames := min(frames, r.capacity-r.readAt)
+	copy(dst, r.data[r.readAt*outputChannels:(r.readAt+firstFrames)*outputChannels])
+	if secondFrames := frames - firstFrames; secondFrames > 0 {
+		copy(dst[firstFrames*outputChannels:], r.data[:secondFrames*outputChannels])
 	}
 	r.readAt = (r.readAt + frames) % r.capacity
 	r.frames -= frames
 	return frames
-}
-
-func writeFloatSamples(output []byte, startFrame int, samples []float32, volume float64) {
-	start := startFrame * outputChannels * 4
-	for index, sample := range samples {
-		value := toFloat32(float64(sample) * volume)
-		byteIndex := start + index*4
-		binary.LittleEndian.PutUint32(output[byteIndex:byteIndex+4], math.Float32bits(value))
-	}
 }
 
 func (r *pcmRing) empty() bool {
@@ -145,13 +126,17 @@ type AudioPlayer struct {
 	device   outputDevice
 	// openDevice starts an output in a share mode on a device ("" is the
 	// Windows default). NewAudioPlayer uses WASAPI.
-	openDevice     func(mode, deviceID string) (outputDevice, error)
-	ring           *pcmRing
-	mode           string
-	deviceID       string
-	volume         float64
-	eqOn           bool
-	eqBands        [3]float64
+	openDevice func(mode, deviceID string) (outputDevice, error)
+	ring       *pcmRing
+	mode       string
+	deviceID   string
+	volume     float64
+	eqOn       bool
+	eqBands    [eqBandCount]float64
+	// eq shapes the sound in render, as it leaves for the device; scratch
+	// holds the samples of one device block while that happens.
+	eq             eqProcessor
+	scratch        []float32
 	path           string
 	durationMs     int64
 	positionFrames int64
@@ -400,7 +385,6 @@ func audioDurationMs(samples int, sampleRate beep.SampleRate) int64 {
 func (p *AudioPlayer) decode(ctx context.Context, generation uint64, stream beep.StreamSeekCloser, format beep.Format) {
 	defer stream.Close()
 	resampler := beep.Resample(3, format.SampleRate, beep.SampleRate(outputSampleRate), stream)
-	processor := newEQProcessor(outputSampleRate)
 	floatSamples := make([][2]float64, 1024)
 	pcm := make([]float32, len(floatSamples)*outputChannels)
 	for {
@@ -417,12 +401,9 @@ func (p *AudioPlayer) decode(ctx context.Context, generation uint64, stream beep
 		}
 		n, ok := resampler.Stream(floatSamples)
 		if n > 0 {
-			enabled, bands := p.equalizerSettings()
-			processor.Set(enabled, bands)
 			for i := 0; i < n; i++ {
-				left, right := processor.Process(floatSamples[i][0], floatSamples[i][1])
-				pcm[i*2] = float32(left)
-				pcm[i*2+1] = float32(right)
+				pcm[i*2] = float32(floatSamples[i][0])
+				pcm[i*2+1] = float32(floatSamples[i][1])
 			}
 			remaining := n
 			written := 0
@@ -483,7 +464,17 @@ func (p *AudioPlayer) render(output, _ []byte, frameCount uint32) {
 	if !p.playing {
 		return
 	}
-	p.positionFrames += int64(p.ring.popIntoFloat32(output, frames, p.volume))
+	if needed := frames * outputChannels; len(p.scratch) < needed {
+		p.scratch = make([]float32, needed) // only when the device asks for a larger block
+	}
+	read := p.ring.popInto(p.scratch, frames)
+	samples := p.scratch[:read*outputChannels]
+	// Equalizing here, after the queue, makes a change audible right away.
+	p.eq.process(samples)
+	for index, sample := range samples {
+		binary.LittleEndian.PutUint32(output[index*4:index*4+4], math.Float32bits(toFloat32(float64(sample)*p.volume)))
+	}
+	p.positionFrames += int64(read)
 	if p.decoderDone && p.ring.empty() {
 		p.playing = false
 		p.ended = true
@@ -518,20 +509,14 @@ func (p *AudioPlayer) SetVolume(value int) {
 	p.mu.Unlock()
 }
 
-func (p *AudioPlayer) SetEqualizer(enabled bool, bands []float64) {
-	var normalized [3]float64
-	for i := 0; i < len(normalized) && i < len(bands); i++ {
-		value := bands[i]
-		if value < -12 {
-			value = -12
-		}
-		if value > 12 {
-			value = 12
-		}
-		normalized[i] = value
-	}
+// SetEqualizer changes the equalizer's ten bands (dB). The change is heard
+// within milliseconds, because render applies it as the audio leaves.
+func (p *AudioPlayer) SetEqualizer(enabled bool, values []float64) {
+	bands := eqBands(values)
+	preamp := eqPreampDB(bands) // outside the lock: render waits on it
 	p.mu.Lock()
-	p.eqOn, p.eqBands = enabled, normalized
+	p.eqOn, p.eqBands = enabled, bands
+	p.eq.setTarget(enabled, bands, preamp)
 	p.mu.Unlock()
 }
 
@@ -563,7 +548,7 @@ func (p *AudioPlayer) State() PlaybackState {
 		DurationMs: p.durationMs,
 		Volume:     int(math.Round(p.volume * 100)),
 		OutputMode: p.mode, DeviceID: p.deviceID, OutputReady: p.ready,
-		EqualizerOn: p.eqOn, Equalizer: []float64{p.eqBands[0], p.eqBands[1], p.eqBands[2]},
+		EqualizerOn: p.eqOn, Equalizer: append([]float64(nil), p.eqBands[:]...),
 		Error: p.lastErr,
 	}
 }
@@ -605,12 +590,6 @@ func (p *AudioPlayer) isPlaying(generation uint64) bool {
 	return p.generation == generation && p.playing
 }
 
-func (p *AudioPlayer) equalizerSettings() (bool, [3]float64) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.eqOn, p.eqBands
-}
-
 func toFloat32(sample float64) float32 {
 	if sample > 1 {
 		sample = 1
@@ -618,113 +597,4 @@ func toFloat32(sample float64) float32 {
 		sample = -1
 	}
 	return float32(sample)
-}
-
-type biquad struct {
-	b0, b1, b2 float64
-	a1, a2     float64
-	z1, z2     float64
-}
-
-func makePeakingEQ(sampleRate, frequency, gainDB, q float64) biquad {
-	if gainDB == 0 {
-		return biquad{b0: 1}
-	}
-	if frequency >= sampleRate/2 {
-		frequency = sampleRate / 2 * 0.95
-	}
-	a := math.Pow(10, gainDB/40)
-	w0 := 2 * math.Pi * frequency / sampleRate
-	alpha := math.Sin(w0) / (2 * q)
-	cosine := math.Cos(w0)
-	a0 := 1 + alpha/a
-	return biquad{
-		b0: (1 + alpha*a) / a0,
-		b1: (-2 * cosine) / a0,
-		b2: (1 - alpha*a) / a0,
-		a1: (-2 * cosine) / a0,
-		a2: (1 - alpha/a) / a0,
-	}
-}
-
-func (b *biquad) process(input float64) float64 {
-	output := b.b0*input + b.z1
-	b.z1 = b.b1*input - b.a1*output + b.z2
-	b.z2 = b.b2*input - b.a2*output
-	return output
-}
-
-// magnitude returns the filter's gain at angular frequency w (radians/sample).
-func (b biquad) magnitude(w float64) float64 {
-	z1 := cmplx.Exp(complex(0, -w))
-	z2 := z1 * z1
-	numerator := complex(b.b0, 0) + complex(b.b1, 0)*z1 + complex(b.b2, 0)*z2
-	denominator := 1 + complex(b.a1, 0)*z1 + complex(b.a2, 0)*z2
-	return cmplx.Abs(numerator / denominator)
-}
-
-// eqHeadroomMarginDB covers the peak falling between the frequencies checked.
-const eqHeadroomMarginDB = 0.1
-
-type eqProcessor struct {
-	sampleRate float64
-	enabled    bool
-	bands      [3]float64
-	left       [3]biquad
-	right      [3]biquad
-	// preamp lowers the input by the equalizer's largest boost, so boosted
-	// frequencies keep their shape instead of clipping at full scale.
-	preamp float64
-}
-
-func newEQProcessor(sampleRate int) *eqProcessor {
-	return &eqProcessor{sampleRate: float64(sampleRate), preamp: 1}
-}
-
-func (e *eqProcessor) Set(enabled bool, bands [3]float64) {
-	if e.enabled == enabled && e.bands == bands {
-		return
-	}
-	e.enabled, e.bands = enabled, bands
-	frequencies := [3]float64{100, 1000, 10000}
-	for i, frequency := range frequencies {
-		e.left[i] = makePeakingEQ(e.sampleRate, frequency, bands[i], 0.707)
-		e.right[i] = makePeakingEQ(e.sampleRate, frequency, bands[i], 0.707)
-	}
-	e.preamp = 1
-	if peak := cascadePeakDB(e.left[:], e.sampleRate); peak > 0 {
-		e.preamp = math.Pow(10, -(peak+eqHeadroomMarginDB)/20)
-	}
-}
-
-// cascadePeakDB returns the largest gain of the filters in series between
-// 20 Hz and 20 kHz, in decibels.
-func cascadePeakDB(filters []biquad, sampleRate float64) float64 {
-	const points = 512
-	peak := math.Inf(-1)
-	for i := 0; i <= points; i++ {
-		frequency := 20 * math.Pow(1000, float64(i)/points)
-		if frequency >= sampleRate/2 {
-			break
-		}
-		w := 2 * math.Pi * frequency / sampleRate
-		gain := 1.0
-		for _, filter := range filters {
-			gain *= filter.magnitude(w)
-		}
-		peak = math.Max(peak, 20*math.Log10(gain))
-	}
-	return peak
-}
-
-func (e *eqProcessor) Process(left, right float64) (float64, float64) {
-	if !e.enabled {
-		return left, right
-	}
-	left, right = left*e.preamp, right*e.preamp
-	for i := range e.left {
-		left = e.left[i].process(left)
-		right = e.right[i].process(right)
-	}
-	return left, right
 }

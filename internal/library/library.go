@@ -33,6 +33,7 @@ type Track struct {
 	Genre           string `json:"genre"`
 	Year            int    `json:"year"`
 	TrackNumber     int    `json:"trackNumber"`
+	DiscNumber      int    `json:"discNumber"`
 	DurationSeconds int    `json:"durationSeconds"`
 	Format          string `json:"format"`
 	SizeBytes       int64  `json:"sizeBytes"`
@@ -226,6 +227,7 @@ func readTrack(path string, info os.FileInfo) (Track, *Artwork, error) {
 		track.Genre = strings.TrimSpace(metadata.Genre())
 		track.Year = metadata.Year()
 		track.TrackNumber, _ = metadata.Track()
+		track.DiscNumber, _ = metadata.Disc()
 		if picture := metadata.Picture(); picture != nil {
 			if art, ok := NewArtwork(picture.Data); ok {
 				artwork = &art
@@ -264,4 +266,19 @@ func probeDuration(path string) int {
 		seconds++
 	}
 	return seconds
+}
+
+// ReadLyrics returns the lyrics stored in the tags of the file at path, or ""
+// when it has none or cannot be read.
+func ReadLyrics(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	metadata, err := tag.ReadFrom(file)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata.Lyrics())
 }
