@@ -18,10 +18,7 @@ tasks:
     cmds:
       - task: generate:syso
       - go build {{.BUILD_FLAGS}} -o {{.BIN_DIR}}/{{.APP_NAME}}.exe
-      - cmd: powershell Remove-item *.syso
-        platforms: [windows]
-      - cmd: rm -f *.syso
-        platforms: [linux, darwin]
+      - powershell Remove-item *.syso
     vars:
       BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{else}}-buildvcs=false -gcflags=all="-l"{{end}}'
     env:
@@ -31,33 +28,9 @@ tasks:
       PRODUCTION: '{{.PRODUCTION | default "false"}}'
 
   package:
-    summary: Packages a production build of the application
-    cmds:
-      - task: '{{if eq (.FORMAT | default "setup") "setup"}}create:setup:installer{{else if eq .FORMAT "msix"}}create:msix:package{{else}}create:nsis:installer{{end}}'
-    vars:
-      FORMAT: '{{.FORMAT | default "setup"}}'
-
-  create:setup:installer:
-    summary: Creates a per-user Windows setup executable
+    summary: Creates the per-user Windows setup executable (scripts/package.ps1)
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File "{{.ROOT_DIR}}/scripts/package.ps1"
-
-  create:msix:package:
-    summary: Creates a Windows MSIX package
-    deps:
-      - task: build
-        vars:
-          PRODUCTION: "true"
-    cmds:
-      - wails3 tool msix --config "{{.ROOT_DIR}}/build/config.yml" --name "{{.APP_NAME}}.exe" --executable "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" --arch "x64" --icon "{{.ROOT_DIR}}/build/appicon.png" --out "{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}-amd64.msix" --use-makeappx {{if .CERT_PATH}}--cert "{{.CERT_PATH}}" --cert-password "{{.CERT_PASSWORD}}"{{end}}
-    vars:
-      CERT_PATH: '{{.CERT_PATH | default ""}}'
-      CERT_PASSWORD: '{{.CERT_PASSWORD | default ""}}'
-
-  install:msix:tools:
-    summary: Checks the Windows SDK MSIX packaging tools
-    cmds:
-      - wails3 tool msix-install-tools
 
   generate:syso:
     summary: Generates Windows `.syso` file
@@ -66,21 +39,6 @@ tasks:
       - go run ../cmd/resourcegen -arch {{.ARCH}} -icon windows/icon.ico -info windows/info.json -version ../version.go -out ../wails_windows_{{.ARCH}}.syso
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
-
-  create:nsis:installer:
-    summary: Creates an NSIS installer
-    dir: build/windows/nsis
-    deps:
-      - task: build
-        vars:
-          PRODUCTION: "true"
-    cmds:
-      # Create the Microsoft WebView2 bootstrapper if it doesn't exist
-      - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
-      - makensis -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
-    vars:
-      ARCH: '{{.ARCH | default ARCH}}'
-      ARG_FLAG: '{{if eq .ARCH "amd64"}}AMD64{{else}}ARM64{{end}}'
 
   run:
     cmds:

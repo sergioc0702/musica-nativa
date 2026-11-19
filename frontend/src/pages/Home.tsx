@@ -1,12 +1,12 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowUpRight, Disc3, FolderPlus, Heart, Pause, Play, RefreshCw, Shuffle, Sparkles } from 'lucide-react'
-import type { ListeningHistory } from '../bindings/musica-nativa/models'
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
-import type { AlbumGroup } from './albums'
-import { useCoverColor } from './coverColor'
-import { coverStyle, formatTime } from './format'
-import { artistInitials, dailyMix, greeting, libraryStats, recentAlbums, rediscover, topArtists, topTracks } from './homeSections'
-import { usePlayback } from './playback'
+import type { ListeningHistory } from '../../bindings/musica-nativa/models'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
+import type { AlbumGroup } from '../lib/albums'
+import { useCoverColor } from '../lib/coverColor'
+import { coverStyle, formatTime } from '../lib/format'
+import { artistInitials, dailyMix, greeting, libraryStats, recentAlbums, rediscover, topArtists, topTracks } from '../lib/homeSections'
+import { usePlayback } from '../lib/playback'
 
 type HomeProps = {
   tracks: Track[]

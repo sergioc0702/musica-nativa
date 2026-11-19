@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { PlaybackState } from '../bindings/musica-nativa/models'
+import type { PlaybackState } from '../../bindings/musica-nativa/models'
 
 // The backend reports playback four times per second while a song plays.
 // Keeping that state outside React state lets only the components that show

@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
-import { LibraryService } from '../bindings/musica-nativa'
-import { getPlayback, setPlayback } from './playback'
-import { curvePath, eqBands, eqMaxGain, eqPresets, presetFor, snapGain } from './equalizer'
+import { LibraryService } from '../../bindings/musica-nativa'
+import { getPlayback, setPlayback } from '../lib/playback'
+import { curvePath, eqBands, eqMaxGain, eqPresets, presetFor, snapGain } from '../lib/equalizer'
 
 const curveWidth = 600
 const curveHeight = 110

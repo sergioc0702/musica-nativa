@@ -1,4 +1,4 @@
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
 
 export type AlbumGroup = { key: string; name: string; artist: string; tracks: Track[] }
 

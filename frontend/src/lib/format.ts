@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
 
 export function formatTime(milliseconds: number) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000))

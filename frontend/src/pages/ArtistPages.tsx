@@ -1,11 +1,11 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowLeft, Disc3, Play, Shuffle, UserRound } from 'lucide-react'
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
-import type { AlbumGroup } from './albums'
-import { useCoverColor } from './coverColor'
-import { coverStyle } from './format'
-import { artistInitials, artistSortNames, sortArtists, type ArtistSort, type ArtistSummary } from './homeSections'
-import { formatLength } from './trackSort'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
+import type { AlbumGroup } from '../lib/albums'
+import { useCoverColor } from '../lib/coverColor'
+import { coverStyle } from '../lib/format'
+import { artistInitials, artistSortNames, sortArtists, type ArtistSort, type ArtistSummary } from '../lib/homeSections'
+import { formatLength } from '../lib/trackSort'
 
 const artistCover = (artist: ArtistSummary): Track | undefined => artist.tracks.find((track) => track.coverUrl)
 

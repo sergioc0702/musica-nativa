@@ -1,7 +1,7 @@
 // Run with `npm test` (Node's own test runner; no extra packages).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
 import { albumSeconds, albumYear, groupAlbums, sortAlbums, type AlbumSort } from './albums.ts'
 
 const song = (title: string, trackNumber: number, discNumber = 0, path = `${title}.mp3`) =>

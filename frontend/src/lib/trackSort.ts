@@ -1,5 +1,5 @@
 // Orders for song lists. "order" keeps the list as given (a playlist's order).
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
 import { compareAlbumOrder } from './albums.ts'
 
 export type SortKey = 'order' | 'title' | 'artist' | 'album' | 'duration' | 'added'

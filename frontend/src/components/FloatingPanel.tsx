@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { X } from 'lucide-react'
-import { clampRect, type PanelID, type Rect, type Size } from './floating'
+import { clampRect, type PanelID, type Rect, type Size } from '../lib/floating'
 
 const storageKey = (id: PanelID) => `mn-panel-${id}`
 const viewport = (): Size => ({ width: window.innerWidth, height: window.innerHeight })

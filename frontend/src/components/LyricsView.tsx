@@ -1,10 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { FileUp, MicVocal, Pencil, RefreshCw, Trash2 } from 'lucide-react'
-import { LibraryService } from '../bindings/musica-nativa'
-import type { Lyrics } from '../bindings/musica-nativa/models'
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
-import { positionNow } from './playback'
-import { currentLineIndex, filledLetters } from './lyrics'
+import { LibraryService } from '../../bindings/musica-nativa'
+import type { Lyrics } from '../../bindings/musica-nativa/models'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
+import { positionNow } from '../lib/playback'
+import { currentLineIndex, filledLetters } from '../lib/lyrics'
 
 const sourceNames: Record<string, string> = {
   manual: 'Letra añadida por ti',

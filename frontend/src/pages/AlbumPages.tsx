@@ -1,9 +1,9 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowLeft, Disc3, Play, Shuffle } from 'lucide-react'
-import { albumSeconds, albumSortNames, albumYear, sortAlbums, type AlbumGroup, type AlbumSort } from './albums'
-import { useCoverColor } from './coverColor'
-import { coverStyle } from './format'
-import { formatLength } from './trackSort'
+import { albumSeconds, albumSortNames, albumYear, sortAlbums, type AlbumGroup, type AlbumSort } from '../lib/albums'
+import { useCoverColor } from '../lib/coverColor'
+import { coverStyle } from '../lib/format'
+import { formatLength } from '../lib/trackSort'
 
 const albumCover = (album: AlbumGroup) => album.tracks.find((track) => track.coverUrl) ?? album.tracks[0]
 

@@ -1,9 +1,9 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { Heart, Music2, Play, Shuffle } from 'lucide-react'
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
-import { useCoverColor } from './coverColor'
-import { coverStyle } from './format'
-import { formatLength } from './trackSort'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
+import { useCoverColor } from '../lib/coverColor'
+import { coverStyle } from '../lib/format'
+import { formatLength } from '../lib/trackSort'
 
 // FavoritesView is the songs marked with a heart: a mosaic of their covers,
 // tinted by the first one, and the list below.

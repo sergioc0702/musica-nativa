@@ -1,5 +1,5 @@
 // What the home page shows, worked out from the library and the listening history.
-import type { Track } from '../bindings/musica-nativa/internal/library/models'
+import type { Track } from '../../bindings/musica-nativa/internal/library/models'
 import { albumKey, compareAlbumOrder, nameKey, sortAlbums, type AlbumGroup } from './albums.ts'
 
 export type TrackPlays = { trackId: string; plays: number }
